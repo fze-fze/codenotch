@@ -74,7 +74,8 @@ Swift 6 / SwiftUI + AppKit, macOS 26, XcodeGen-generated project, agent app
 
 ```sh
 brew install xcodegen   # once
-make run                # generate, build, launch
+make run                # generate, build, launch out of the build directory
+make install            # ...or put it in /Applications and launch it there
 make test               # unit tests
 ```
 
