@@ -19,25 +19,15 @@ struct SettingsView: View {
     /// Re-reads a provider's credential. For a declined keychain prompt that is
     /// the whole remedy: asking again is what puts the prompt back on screen.
     let retry: (String) -> Void
-    @ObservedObject var updater: Updater
 
     var body: some View {
-        // One page of grouped sections rather than tabs. Tabs hid three
-        // quarters of the settings behind a click, for an app with about a
-        // screenful of them in total — the grouping was the thing that was
-        // missing, not the separation. A grouped `Form` is what macOS itself
-        // uses for this: each section is a titled, rounded group, so the
-        // structure is visible all at once instead of navigated to.
         Form {
             Section("Integrations") {
-                if needsSetup { setupNote }
                 ForEach(accounts) {
                     AccountRow(provider: $0, preferences: preferences,
                                signOut: signOut, signIn: signIn,
                                switchAccount: switchAccount, retry: retry)
                 }
-                // Beside the switches it explains, not stranded at the end of
-                // the page.
                 Text("Codenotch never signs in — each reading is borrowed from the "
                      + "tool that already holds the account. Signing out here stops "
                      + "the credential being read and forgets the numbers, but leaves "
@@ -49,10 +39,6 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // One section, because they are one question: what Codenotch
-            // looks like and where it turns up. Split across three headers it
-            // read as three unrelated settings, and "Where Codenotch appears"
-            // was a header long enough to look like a warning.
             Section("Appearance") {
                 Picker("Show", selection: $preferences.notchVisibility) {
                     ForEach(NotchVisibility.allCases) { Text($0.title).tag($0) }
@@ -74,8 +60,6 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // "App icon", not "Icon": the two rows above it are about the
-                // notch, and on its own the word would read as another of them.
                 Picker("App icon", selection: $preferences.appPresence) {
                     ForEach(AppPresence.allCases) { Text($0.title).tag($0) }
                 }
@@ -87,9 +71,6 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Startup and updates together: both are about what Codenotch does
-            // without being asked, and one switch under its own header looked
-            // like an oversight rather than a section.
             Section("General") {
                 Toggle("Open Codenotch at login", isOn: $preferences.launchAtLogin)
                 if let problem = preferences.launchAtLoginProblem {
@@ -98,48 +79,9 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Toggle("Install updates automatically", isOn: Binding(
-                    get: { updater.automatic },
-                    set: { updater.automatic = $0 }
-                ))
-
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    // Disclosed rather than merely silent. An app that updates
-                    // itself unprompted *and* reads other apps' credentials is
-                    // exactly the shape security tooling flags; saying so, with
-                    // a way to switch it off, is the difference between a
-                    // background updater and something that looks like it is
-                    // hiding.
-                    Text("Version \(updater.currentVersion). Updates install in the "
-                         + "background and apply next time Codenotch starts.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Button("Check now") { updater.checkNow() }
-                        .controlSize(.small)
-                }
-
-                // Says what happened, where the user is already looking.
-                // Sparkle's own answer to a failed check is a modal reading
-                // "an error occurred in retrieving update information", which
-                // names no cause and offers nothing to do about it.
-                if let message = updater.outcome.message {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(
-                            updater.outcome == .unreachable ? .orange : .secondary
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
         }
         .formStyle(.grouped)
-        // Outside the form, so it stays put at the foot of the window rather
-        // than scrolling away below the last section — a credit that has to be
-        // hunted for is not really a credit.
-        .safeAreaInset(edge: .bottom, spacing: 0) { credit }
         .frame(width: SettingsView.width, height: SettingsView.height)
         .onAppear { accounts = providers() }
         .onReceive(NotificationCenter.default.publisher(
@@ -147,87 +89,8 @@ struct SettingsView: View {
         )) { _ in accounts = providers() }
     }
 
-    private var credit: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 4) {
-                Text("App designed and developed by")
-                // Only the handle is the link, so the line reads as a sentence
-                // rather than as a button with a sentence attached.
-                Link("@hivinz_", destination: SettingsView.authorURL)
-                    // A link that does not change the pointer reads as text.
-                    .onHover { inside in
-                        if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                    }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-        }
-        .background(.ultraThinMaterial)
-    }
-
-    static let authorURL = URL(string: "https://x.com/hivinz_")!
-
-    /// Narrower than the tabbed version needed: without a row of tab titles to
-    /// fit, the width is set by the account rows alone.
     static let width: CGFloat = 500
-    /// Tall enough that Startup and Updates are visible without scrolling —
-    /// four account rows push everything below them a long way down.
-    static let height: CGFloat = 560
-
-    /// Nothing to read from anywhere. On a first launch that is the normal
-    /// state, and it is the only moment the sheet has something to explain.
-    private var needsSetup: Bool {
-        !accounts.isEmpty && accounts.allSatisfy { $0.account == nil }
-    }
-
-    /// Names the tools rather than saying "tools already signed in on this
-    /// Mac". Someone who uses Claude in a browser reads that sentence, installs
-    /// this, sees four blank rings and concludes it is broken — and the
-    /// distinction that catches them out is Claude *Code*, not the Claude app.
-    static let setupCopy =
-        "Codenotch reads usage from tools already signed in on this Mac — it "
-        + "never asks for your password. Install and sign in to any of Claude "
-        + "Code (the terminal tool, not the Claude app), Cursor, Codex or "
-        + "Antigravity, and its ring appears in the notch."
-
-    /// Said before it happens rather than after. A system dialogue asking to
-    /// read a *credential*, from an app installed a minute ago, looks alarming
-    /// unless it was expected — and choosing Allow instead of Always Allow makes
-    /// it return on every read, which is what "it asks every time" turns out to
-    /// be.
-    static let keychainCopy =
-        "macOS will ask once for permission to read Claude Code's and "
-        + "Antigravity's saved logins. Choose Always Allow — plain Allow makes "
-        + "it ask again every time."
-
-    private var setupNote: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Connect an assistant to get started")
-                    .font(.callout.weight(.medium))
-                Text(SettingsView.setupCopy)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(SettingsView.keychainCopy)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-
+    static let height: CGFloat = 430
 }
 
 /// One provider: whether Codenotch reads it, whose account that is, and where

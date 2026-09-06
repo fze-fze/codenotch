@@ -1,5 +1,4 @@
 import XCTest
-import Sparkle
 @testable import Codenotch
 
 /// Fixtures are the real thing: the keychain payload's shape and the actual
@@ -696,42 +695,7 @@ final class AccountDestinationTests: XCTestCase {
     }
 }
 
-/// What a fresh install is told. Both sentences exist because of a specific way
-/// a new user gets stranded, so both are pinned rather than left to drift.
-@MainActor
-final class FirstRunCopyTests: XCTestCase {
-    private func settings() -> SettingsView {
-        let name = "FirstRunCopyTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
-        return SettingsView(preferences: Preferences(defaults: defaults),
-                            providers: { [] },
-                            signOut: { _ in }, signIn: { _ in true },
-                            switchAccount: { _ in true },
-                            retry: { _ in },
-                            updater: Updater())
-    }
 
-    /// The setup note has to name the tools. "Tools already signed in on this
-    /// Mac" reads as satisfied by anyone who uses Claude in a browser, and the
-    /// distinction that catches them is Claude *Code*.
-    func testTheSetupNoteNamesEveryToolAndTheCodeDistinction() {
-        let copy = SettingsView.setupCopy
-        for tool in ["Claude Code", "Cursor", "Codex", "Antigravity"] {
-            XCTAssertTrue(copy.contains(tool), "the setup note never mentions \(tool)")
-        }
-        XCTAssertTrue(copy.contains("not the Claude app"),
-                      "nothing warns that the Claude app is not Claude Code")
-    }
-
-    /// The keychain prompt is the only interruption in the whole first run, and
-    /// choosing Allow rather than Always Allow is what makes it recur.
-    func testTheKeychainPromptIsExplainedBeforeItAppears() {
-        let copy = SettingsView.keychainCopy
-        XCTAssertTrue(copy.contains("Always Allow"))
-        XCTAssertTrue(copy.lowercased().contains("macos will ask"))
-    }
-}
 
 /// Antigravity's port changes on every launch, so the bridge failing is a
 /// routine event — the app was restarted, not the account lost.
@@ -762,14 +726,7 @@ final class AntigravityFallbackTests: XCTestCase {
     }
 }
 
-final class AuthorCreditTests: XCTestCase {
-    /// Pinned because a wrong handle in a credit is worse than none, and it is
-    /// the kind of string nobody re-reads once it looks right.
-    func testTheCreditPointsAtTheRightAccount() {
-        XCTAssertEqual(SettingsView.authorURL.absoluteString, "https://x.com/hivinz_")
-        XCTAssertEqual(SettingsView.authorURL.scheme, "https")
-    }
-}
+
 
 /// Where the app shows itself, apart from the notch. Only one of the three has
 /// a Dock tile, and only one makes a menu bar item — get either mapping wrong
@@ -830,41 +787,7 @@ final class AppPresenceTests: XCTestCase {
     }
 }
 
-/// What the settings sheet says after a check. Sparkle's own answer to a failed
-/// one is a modal reading "an error occurred in retrieving update information",
-/// which names no cause and offers nothing to do — so the outcome is kept and
-/// worded here instead.
-@MainActor
-final class UpdateOutcomeTests: XCTestCase {
-    /// The case people actually hit, and the one that most needs reassuring:
-    /// nothing is wrong with their copy of the app.
-    func testAnUnreachableFeedSaysSoWithoutBlamingTheApp() throws {
-        let message = try XCTUnwrap(Updater.Outcome.unreachable.message)
-        XCTAssertTrue(message.contains("Couldn't reach"))
-        XCTAssertTrue(message.contains("nothing is wrong with this copy"))
-        XCTAssertFalse(message.lowercased().contains("error occurred"))
-    }
 
-    func testEveryOutcomeExceptIdleSaysSomething() {
-        XCTAssertNil(Updater.Outcome.idle.message)
-        for outcome: Updater.Outcome in [.checking, .upToDate(Date()), .found("1.1.0"),
-                                         .unreachable, .failed("disk full")] {
-            XCTAssertNotNil(outcome.message, "\(outcome) says nothing")
-        }
-    }
-
-    func testAFoundUpdateNamesTheVersion() throws {
-        let message = try XCTUnwrap(Updater.Outcome.found("1.2.0").message)
-        XCTAssertTrue(message.contains("1.2.0"))
-    }
-
-    /// The distinction the wording depends on: a feed that cannot be fetched is
-    /// routine, anything else is reported as itself.
-    func testOnlyAFeedFailureCountsAsUnreachable() {
-        XCTAssertTrue(Updater.isUnreachable(Int(SUError.appcastError.rawValue)))
-        XCTAssertFalse(Updater.isUnreachable(Int(SUError.installationError.rawValue)))
-    }
-}
 
 /// The menu bar mark. Loaded from the asset catalogue rather than drawn from
 /// the app icon, and a template so macOS can tint it for whatever the bar is.

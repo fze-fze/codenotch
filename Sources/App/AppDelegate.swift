@@ -8,9 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitors: [String: any AgentActivityMonitor] = [:]
     private var preferences: Preferences?
     private var settings: SettingsWindowController?
-    private var whatsNew: WhatsNewWindowController?
-    /// Held for the life of the app: releasing it stops the scheduled checks.
-    private var updater: Updater?
     private var statusItem: StatusItemController?
     private var cancellables = Set<AnyCancellable>()
 
@@ -39,17 +36,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["CODENOTCH_DEMO"] == "1" {
             controller.model.snapshots = Fixtures.snapshots()
         } else {
-            // Nothing needs a browser session at the moment. `WebSessionProvider`
-            // and `Sites.perplexity` are kept: they are the working pattern for a
-            // site behind bot management, and re-registering is one line.
-            let webProviders: [WebSessionProvider] = []
-            controller.signInItems = webProviders.map { provider in
-                (title: "Sign in to \(provider.displayName)…",
-                 action: { [weak provider] in provider?.presentSignIn() })
-            }
-            // Before Preferences reads anything, or the first launch flag and
-            // every choice would be read from an empty domain.
-            Preferences.migrateFromPreviousName()
             let preferences = Preferences()
             self.preferences = preferences
 
@@ -62,8 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // switched-off ones once the binding below delivered.
             let store = UsageStore(
                 providers: [ClaudeOAuthProvider(), CursorLocalProvider(),
-                            CodexLocalProvider(), AntigravityProvider()]
-                    + webProviders,
+                            CodexLocalProvider(), AntigravityProvider()],
                 disconnected: preferences.disconnectedProviders
             )
 
@@ -74,16 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // right-hand one and then crossfades away from it.
             controller.model.edge = preferences.notchEdge
 
-            let updater = Updater()
-            self.updater = updater
-
             let settings = SettingsWindowController(
                 preferences: preferences,
                 // A closure so the sheet re-reads accounts each time it comes
                 // forward; a snapshot here is what made a switched account keep
                 // showing the old address until the app restarted.
                 providers: { [weak store] in store?.providerSummaries ?? [] },
-                updater: updater,
                 signOut: { [weak store] in store?.signOut(providerID: $0) },
                 signIn: { [weak store] in store?.signIn(providerID: $0) ?? false },
                 switchAccount: { [weak store] in
@@ -93,29 +74,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             controller.onOpenSettings = { [weak settings] in settings?.show() }
             self.settings = settings
-
-            // What changed, once per version — including on a fresh install,
-            // where it is the introduction.
-            let whatsNew = WhatsNewWindowController(
-                preferences: preferences, version: updater.currentVersion
-            )
-            self.whatsNew = whatsNew
-
-            // An agent app has no dock icon and no window: installed and
-            // launched, it shows four empty rings on a screen edge and no
-            // reason to look at them. Once, on the very first run, it opens the
-            // one place that explains what to connect.
-            //
-            // Sequenced behind What's New rather than beside it: two windows
-            // arriving together is one to dismiss before you can read either.
-            let introduce = { [weak settings] in
-                guard preferences.isFirstLaunch else { return }
-                settings?.show()
-            }
-            whatsNew.onDismiss = introduce
-            if !whatsNew.showIfNeeded() {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: introduce)
-            }
 
             let statusItem = StatusItemController { [weak settings] in settings?.show() }
             self.statusItem = statusItem
@@ -160,18 +118,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak controller] ids in controller?.model.refreshing = ids }
                 .store(in: &cancellables)
 
-            // CODENOTCH_DISCOVER=<url> loads that page in the signed-in WebView
-            // and logs the API calls it makes — for finding an undocumented
-            // endpoint by watching the site rather than guessing at path names.
-            if let target = ProcessInfo.processInfo.environment["CODENOTCH_DISCOVER"],
-               let url = URL(string: target),
-               let provider = webProviders.first(where: { url.host?.contains($0.id) == true })
-                   ?? webProviders.first {
-                Task {
-                    let calls = await provider.recordCalls(on: url)
-                    Log.usage.notice("discovered: \(calls.joined(separator: "  "), privacy: .public)")
-                }
-            }
             self.store = store
         }
 

@@ -31,15 +31,6 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(appPresence.rawValue, forKey: Keys.presence) }
     }
 
-    /// The version whose changes have already been shown.
-    ///
-    /// Written when the What's New dialogue is dismissed rather than when it
-    /// opens, so a crash in between cannot swallow the one launch it was going
-    /// to appear on.
-    @Published var lastSeenVersion: String? {
-        didSet { defaults.set(lastSeenVersion, forKey: Keys.lastSeenVersion) }
-    }
-
     @Published var launchAtLogin: Bool {
         didSet {
             guard launchAtLogin != Self.isRegisteredForLogin else { return }
@@ -59,7 +50,6 @@ final class Preferences: ObservableObject {
         static let visibility = "notchVisibility"
         static let presence = "appPresence"
         static let edge = "notchEdge"
-        static let lastSeenVersion = "lastSeenVersion"
     }
 
     /// True the very first time this copy runs, and never again.
@@ -69,30 +59,6 @@ final class Preferences: ObservableObject {
     /// them to the app every launch would be worse than never introducing them
     /// at all.
     let isFirstLaunch: Bool
-
-    /// The bundle identifier before the app was renamed to Codenotch.
-    ///
-    /// A bundle id is the name of the defaults domain, so renaming the app
-    /// silently moved every setting to a new, empty one — connection choices,
-    /// the notch's mode, the archived readings, all apparently lost. Copying
-    /// the old domain across once is the difference between a rename and what
-    /// looks like a reset.
-    private static let previousDomain = "com.vinz.usagenotch"
-
-    static func migrateFromPreviousName(into defaults: UserDefaults = .standard,
-                                        from domain: String = previousDomain) {
-        // The emptiness test has to be about the object being written to, not
-        // about `Bundle.main` — under test those are different domains, and the
-        // first version happily copied real settings into a test's scratch
-        // suite. `hasLaunched` is the sentinel: `Preferences.init` sets it, so
-        // its absence means nothing has ever used this domain.
-        guard defaults.object(forKey: Keys.hasLaunched) == nil,
-              let old = defaults.persistentDomain(forName: domain), !old.isEmpty
-        else { return }
-
-        for (key, value) in old { defaults.set(value, forKey: key) }
-        Log.usage.info("migrated \(old.count) settings from the previous app name")
-    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -113,9 +79,6 @@ final class Preferences: ObservableObject {
         // side of a Mac that no system chrome claims by default.
         self.notchEdge = defaults.string(forKey: Keys.edge)
             .flatMap(NotchEdge.init(rawValue:)) ?? .right
-        // Absent means nothing has been shown yet, which is true of a fresh
-        // install — so the current release reads as new to it.
-        self.lastSeenVersion = defaults.string(forKey: Keys.lastSeenVersion)
         // Read from the system rather than from our own store: the user can turn
         // this off in System Settings, and a remembered `true` would then be a lie.
         self.launchAtLogin = Self.isRegisteredForLogin
@@ -141,7 +104,7 @@ final class Preferences: ObservableObject {
     /// Nothing but the app itself can clean that up, so the app has to offer it.
     ///
     /// Not tied to uninstalling: a reinstall is indistinguishable from an
-    /// update, and wiping data on every Sparkle update would be catastrophic.
+    /// update, and wiping data on every update would be catastrophic.
     /// It has to be something the user asks for.
     static func eraseAllData() {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.vinz.codenotch"
