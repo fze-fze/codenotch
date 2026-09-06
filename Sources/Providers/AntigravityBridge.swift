@@ -137,6 +137,10 @@ enum AntigravityBridge {
             struct Bucket: Decodable {
                 let bucketId: String?
                 let displayName: String?
+                /// Which window this bucket meters — "weekly" on the one shape
+                /// captured verbatim. Read as a hint, not as a contract: the
+                /// id is the half confirmed for every bucket seen in the wild.
+                let window: String?
                 let remainingFraction: Double?
                 let resetTime: String?
             }
@@ -153,20 +157,122 @@ enum AntigravityBridge {
         else { return [] }
 
         return groups.flatMap { group -> [LimitWindow] in
-            (group.buckets ?? []).compactMap { bucket in
+            // Soonest deadline first, within each group. Antigravity returns
+            // the week before the five hours, but the five hours is the one
+            // that actually stops you — and the first window is the one the
+            // notch puts on the ring, so the order is not merely cosmetic. It
+            // also matches how every other provider here reads: Codex leads
+            // with its 5h limit, Claude with the current session.
+            //
+            // Sorted by when the window rolls rather than by its name, so a
+            // window neither of us has seen yet still lands in the right place.
+            let buckets = (group.buckets ?? []).sorted { a, b in
+                switch (a.resetTime.flatMap(AntigravityCredentials.parse),
+                        b.resetTime.flatMap(AntigravityCredentials.parse)) {
+                case let (l?, r?): return l < r
+                case (nil, _?):    return false   // undated windows go last
+                case (_?, nil):    return true
+                case (nil, nil):   return false
+                }
+            }
+            return buckets.compactMap { bucket in
                 guard let remaining = bucket.remainingFraction,
                       remaining >= 0, remaining <= 1
                 else { return nil }
                 return LimitWindow(
                     id: bucket.bucketId ?? group.displayName ?? "quota",
-                    // The group names the models; the bucket only ever says
-                    // "Weekly Limit Remaining", which is the same for both.
-                    label: group.displayName ?? bucket.displayName ?? "Usage",
+                    label: label(models: group.displayName,
+                                 bucketId: bucket.bucketId,
+                                 window: bucket.window,
+                                 bucketName: bucket.displayName),
                     usedFraction: 1 - remaining,
                     resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse)
                 )
             }
         }
+    }
+
+    /// What one row calls itself.
+    ///
+    /// The group names the models and the bucket names the window, and it
+    /// takes both to identify a row. Antigravity meters each group of models
+    /// over a rolling five hours *and* over a week, so a label taken from the
+    /// group alone printed "Gemini Models" twice and "Claude and GPT models"
+    /// twice — four rows with two names between them, and nothing on the row
+    /// to say which was which. The reset line was the only tell, and reading
+    /// "Resets in 51 min" against "Resets Fri 12:00 AM" is work the label
+    /// should have saved.
+    ///
+    /// The earlier comment here said the bucket "only ever says 'Weekly Limit
+    /// Remaining', which is the same for both". That was true of the one
+    /// response captured at the time, when each group had a single bucket.
+    static func label(models: String?, bucketId: String?,
+                      window: String?, bucketName: String?) -> String {
+        let period = period(bucketId: bucketId, window: window, bucketName: bucketName)
+
+        // Nothing names the models — an ungrouped bucket, which the direct
+        // Google path can return. The window's own words are then the whole
+        // label, not half of "Daily Limit · Daily".
+        guard let models, !models.isEmpty else {
+            return period ?? bucketName ?? "Usage"
+        }
+        guard let period else { return shorten(models) }
+        return "\(shorten(models)) · \(period)"
+    }
+
+    /// The models a group covers, in the fewest words that still name them.
+    ///
+    /// There is very little room. The card is 600 frame px wide, the reset copy
+    /// sits on the same line, and a weekly window six days out prints the long
+    /// form — "Resets Sat 1:40 AM" — which leaves about half the line for the
+    /// label. Google writes "Gemini Models" and "Claude and GPT models", and
+    /// the full name plus a window name does not fit: both of that group's rows
+    /// truncated to "Claude and GPT m…", which is a worse duplicate than the
+    /// one this was meant to cure.
+    ///
+    /// So the two words that carry nothing are dropped. Every row in this card
+    /// is a group of models, which makes the trailing noun redundant, and an
+    /// ampersand says "and" in a fifth of the width.
+    static func shorten(_ name: String) -> String {
+        var text = name
+        for suffix in [" models", " Models"] where text.hasSuffix(suffix) {
+            text = String(text.dropLast(suffix.count))
+        }
+        return text.replacingOccurrences(of: " and ", with: " & ")
+    }
+
+    /// Which window a bucket meters, in as few words as the row has room for.
+    ///
+    /// The id is read first because it is the half confirmed for every bucket
+    /// seen in the wild — `gemini-weekly`, `gemini-5h`, `3p-weekly`, `3p-5h` —
+    /// and it is what the archive keys on, so it cannot drift without the
+    /// stored readings drifting with it. `window` is the server's own word for
+    /// the same thing and stands in when the id is not one of those shapes.
+    static func period(bucketId: String?, window: String?, bucketName: String?) -> String? {
+        for candidate in [bucketId, window] {
+            guard let text = candidate?.lowercased(), !text.isEmpty else { continue }
+            if text.contains("5h") || text.contains("5-hour") || text.contains("five") {
+                return "5h"
+            }
+            // Named as spans rather than as adverbs — "Week" beside "5h"
+            // rather than "Weekly" beside "5h" — because the pair has to read
+            // as two lengths of the same thing, and because the six characters
+            // saved are the ones that decide whether the row fits.
+            if text.contains("week")  { return "Week" }
+            if text.contains("month") { return "Month" }
+            if text.contains("dai") || text.contains("day") { return "Day" }
+            if text.contains("hour")  { return "Hour" }
+        }
+
+        // A shape not seen here. Fall back to the bucket's own words with the
+        // boilerplate taken off: "Weekly Limit Remaining" spends three words
+        // saying what the bar and the percentage under it already say.
+        var name = bucketName ?? ""
+        for boilerplate in ["Limit", "Remaining", "Quota", "Usage"] {
+            name = name.replacingOccurrences(of: boilerplate, with: "")
+        }
+        name = name.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
     }
 
     // MARK: - Plumbing

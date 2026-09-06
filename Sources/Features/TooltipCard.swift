@@ -142,9 +142,15 @@ private struct SplitRow<Accessory: View>: View {
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
-        HStack(spacing: Design.px(20)) {
+        // One gap between the two halves, which is what the frame shows. Set as
+        // the Spacer's minimum rather than as the stack's spacing: spacing
+        // applies either side of the Spacer, so the row was reserving 2 x 20px
+        // between label and reset copy and giving the label 20px less than the
+        // design allows it. That is the difference between "Claude & GPT ·
+        // Week" fitting and being truncated to "Claude & GPT · We…".
+        HStack(spacing: 0) {
             Text(leading).foregroundStyle(leadingColor)
-            Spacer(minLength: 0)
+            Spacer(minLength: Design.px(20))
             HStack(spacing: NotchLayout.statusDotGap) {
                 accessory()
                 Text(trailing).foregroundStyle(trailingColor)
@@ -232,6 +238,8 @@ private struct LimitWindowRow: View {
     let window: LimitWindow
     let fidelity: Fidelity
     let now: Date
+    /// Whether the reading behind this row is remembered rather than current.
+    var isStale = false
 
     private var band: UsageBand { UsageBand.band(for: window.usedFraction ?? 0) }
     private var trackWidth: CGFloat { NotchLayout.cardWidth - 2 * NotchLayout.cardPadding }
@@ -241,8 +249,18 @@ private struct LimitWindowRow: View {
     }
 
     /// Blank rather than invented: some providers never say when the window rolls.
+    ///
+    /// A reset time that has passed means "resetting now" only while the
+    /// reading is current. On a remembered one it means the opposite — the
+    /// window rolled over at some point we did not see, and the numbers here
+    /// are from before it. Saying "Resetting…" then is a live-sounding claim
+    /// about a reading hours old, which is how a Claude token that expired
+    /// overnight left the card announcing a reset all morning. The header
+    /// already says how old the reading is; this line says nothing.
     private var resetText: String {
-        window.resetsAt.map { ResetCopy.text(for: $0, now: now) } ?? ""
+        guard let resetsAt = window.resetsAt else { return "" }
+        if isStale && resetsAt <= now { return "" }
+        return ResetCopy.text(for: resetsAt, now: now)
     }
 
     var body: some View {
@@ -301,7 +319,8 @@ private struct ProviderTooltip: View {
                     .padding(.top, NotchLayout.headerToBlock)
             } else {
                 ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
-                    LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now)
+                    LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now,
+                                   isStale: snapshot.status.isStale)
                         .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
                 }
             }

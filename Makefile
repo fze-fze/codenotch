@@ -1,4 +1,8 @@
-export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
+# Xcode's location, asked for rather than assumed. Hardcoding
+# /Applications/Xcode.app fails outright on a machine running an Xcode beta,
+# where the directory simply does not exist — and `xcode-select -p` is the
+# same answer every other tool in the toolchain already uses.
+export DEVELOPER_DIR := $(shell xcode-select -p)
 
 PROJECT := Codenotch.xcodeproj
 SCHEME  := Codenotch

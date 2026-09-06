@@ -202,7 +202,32 @@ final class AntigravityQuotaTests: XCTestCase {
         let windows = AntigravityProvider.windows(in: body)
         XCTAssertEqual(windows.count, 1)
         XCTAssertEqual(windows.first?.usedFraction ?? 0, 0.25, accuracy: 0.0001)
-        XCTAssertEqual(windows.first?.label, "Daily")
+        // Both halves: the group says which models, the bucket says which
+        // window. Either one alone stops identifying a row as soon as there is
+        // more than one of the other.
+        XCTAssertEqual(windows.first?.label, "Gemini · Day")
+    }
+
+    /// The same bug the bridge had, in the shape this path would meet it: one
+    /// group, two windows. Labelled from the bucket alone both rows read
+    /// "Weekly Limit Remaining"; from the group alone, both read "Gemini".
+    func testTwoWindowsInOneGroupAreToldApart() {
+        let body = Data("""
+        {"quotaGroups":[{"displayName":"Gemini","buckets":[
+          {"name":"gemini-weekly","displayName":"Weekly Limit Remaining",
+           "used":10,"limit":100},
+          {"name":"gemini-5h","displayName":"Weekly Limit Remaining",
+           "used":5,"limit":100}]}]}
+        """.utf8)
+        XCTAssertEqual(AntigravityProvider.windows(in: body).map(\.label),
+                       ["Gemini · Week", "Gemini · 5h"])
+    }
+
+    /// An ungrouped bucket has no models to name, so the window's own words
+    /// are all there is — and they are used rather than left as boilerplate.
+    func testAnUngroupedBucketFallsBackToItsOwnName() {
+        let body = Data(#"{"buckets":[{"name":"x","displayName":"Daily Limit","used":1,"limit":4}]}"#.utf8)
+        XCTAssertEqual(AntigravityProvider.windows(in: body).first?.label, "Daily")
     }
 
     /// Cursor's free plan reports an included limit of zero, and dividing by it
@@ -290,6 +315,27 @@ final class AntigravityBridgeTests: XCTestCase {
                    "resetTime":"2026-09-08T09:12:10Z"}]}]}}
     """.utf8)
 
+    /// The same server, once each group is metered over two windows rather
+    /// than one — the shape a real account returns today. Ids verbatim from
+    /// the readings Codenotch had archived.
+    private let bothWindows = Data("""
+    {"response":{"groups":[
+      {"displayName":"Gemini Models",
+       "buckets":[{"bucketId":"gemini-weekly","displayName":"Weekly Limit Remaining",
+                   "window":"weekly","remainingFraction":0.976,
+                   "resetTime":"2026-09-07T14:12:34Z"},
+                  {"bucketId":"gemini-5h","displayName":"Weekly Limit Remaining",
+                   "remainingFraction":0.987,
+                   "resetTime":"2026-09-06T02:15:08Z"}]},
+      {"displayName":"Claude and GPT models",
+       "buckets":[{"bucketId":"3p-weekly","displayName":"Weekly Limit Remaining",
+                   "window":"weekly","remainingFraction":1,
+                   "resetTime":"2026-09-08T09:12:10Z"},
+                  {"bucketId":"3p-5h","displayName":"Weekly Limit Remaining",
+                   "remainingFraction":1,
+                   "resetTime":"2026-09-06T02:22:12Z"}]}]}}
+    """.utf8)
+
     /// The server reports what is *left*; the notch shows what is spent.
     /// Inverting it here rather than in the view keeps a percentage meaning the
     /// same thing whichever provider produced it.
@@ -298,7 +344,47 @@ final class AntigravityBridgeTests: XCTestCase {
         XCTAssertEqual(windows.count, 2)
         XCTAssertEqual(windows[0].id, "gemini-weekly")
         XCTAssertEqual(windows[0].usedFraction ?? 0, 1 - 0.96262, accuracy: 0.00001)
-        XCTAssertEqual(windows[0].label, "Gemini Models")
+        XCTAssertEqual(windows[0].label, "Gemini · Week")
+    }
+
+    /// What the server actually returns now: each group metered over both a
+    /// rolling five hours and a week. Labelled from the group alone — which is
+    /// what it did — this printed "Gemini Models" twice and "Claude and GPT
+    /// models" twice, and the only thing telling the pairs apart was a reset
+    /// line reading "Resets in 51 min" against "Resets Fri 12:00 AM".
+    func testEachModelGroupsTwoWindowsAreToldApart() {
+        XCTAssertEqual(AntigravityBridge.windows(in: bothWindows).map(\.label), [
+            "Gemini · 5h",
+            "Gemini · Week",
+            "Claude & GPT · 5h",
+            "Claude & GPT · Week"
+        ])
+    }
+
+    /// The ids are what the archive keys on, so they have to survive the
+    /// relabelling untouched — a changed id silently discards the stored
+    /// reading it belonged to. Their *order* is deliberate: soonest deadline
+    /// first, so the ring leads with the five hours rather than the week.
+    func testTheIdsAreLeftAlone() {
+        XCTAssertEqual(AntigravityBridge.windows(in: bothWindows).map(\.id),
+                       ["gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly"])
+    }
+
+    /// `window` stands in when the id is not one of the known shapes. Both are
+    /// read, in that order, because the id is the half confirmed in the wild.
+    func testTheServersOwnWordForTheWindowIsTheFallback() {
+        let body = Data("""
+        {"response":{"groups":[{"displayName":"G","buckets":[
+          {"bucketId":"opaque-a","window":"monthly","remainingFraction":0.5}]}]}}
+        """.utf8)
+        XCTAssertEqual(AntigravityBridge.windows(in: body).first?.label, "G · Month")
+    }
+
+    /// Nothing names the window: the row keeps the models and says no more,
+    /// rather than inventing a period it was never told.
+    func testAnUnnamedWindowLeavesTheLabelAlone() {
+        let body = Data(#"{"response":{"groups":[{"displayName":"G","buckets":[{"bucketId":"a","remainingFraction":0.5}]}]}}"#.utf8)
+        XCTAssertEqual(AntigravityBridge.windows(in: body).first?.label, "G")
     }
 
     /// A full bucket is 0% used, not "no reading".
@@ -912,5 +998,32 @@ final class KeychainProviderTests: XCTestCase {
         XCTAssertTrue(summary("gemini").usesKeychain)
         XCTAssertFalse(summary("cursor").usesKeychain, "Cursor reads a file, not the keychain")
         XCTAssertFalse(summary("codex").usesKeychain, "Codex reads a file, not the keychain")
+    }
+}
+
+/// The memory that keeps a real percentage on screen while Antigravity is
+/// merely closed. Kept in memory alone it was forgotten by every relaunch, so
+/// the first refresh after `make run` swapped the ring's percentage for the
+/// request count — the exact substitution it exists to prevent.
+final class AntigravityBridgeMemoryTests: XCTestCase {
+    func testAServerThatHasNeverAnsweredHasNotBridged() {
+        XCTAssertFalse(AntigravityProvider.hasBridged(at: nil, now: Date()))
+    }
+
+    /// Antigravity closed for the afternoon is still Antigravity, and the
+    /// reading it gave this morning is still the truest thing we have.
+    func testRecentSilenceStillCounts() {
+        let now = Date()
+        XCTAssertTrue(AntigravityProvider.hasBridged(at: now.addingTimeInterval(-2 * 24 * 3600),
+                                                     now: now))
+    }
+
+    /// A week is one whole reset cycle. Past it, an uninstalled Antigravity is
+    /// the likelier explanation than a long weekend, and a count we can take
+    /// ourselves beats a percentage nobody has confirmed since.
+    func testAWeekOfSilenceGivesUp() {
+        let now = Date()
+        let stale = now.addingTimeInterval(-AntigravityProvider.bridgeMemory - 1)
+        XCTAssertFalse(AntigravityProvider.hasBridged(at: stale, now: now))
     }
 }

@@ -33,20 +33,56 @@ actor AntigravityProvider: UsageProvider {
     /// Re-discovering the port and token means spawning `ps` and `lsof`, which
     /// is not something to do every minute. Cached until it stops working.
     private var bridge: AntigravityBridge.Endpoint?
-    /// Whether the language server has ever answered.
+    private let defaults: UserDefaults
+
+    init(session: URLSession = .shared, defaults: UserDefaults = .standard) {
+        self.session = session
+        self.defaults = defaults
+        self.localSession = URLSession(configuration: .ephemeral,
+                                       delegate: LocalhostTrust(),
+                                       delegateQueue: nil)
+    }
+
+    /// When the language server last answered.
+    ///
+    /// Persisted, because it is a fact about the account and not about this
+    /// run of the app. Held in memory alone it was forgotten by every
+    /// relaunch — and a relaunch is not rare: `make run`, a restart, logging
+    /// back in. The ring then went from a real percentage to "31" on the first
+    /// refresh after launch, which is precisely the swap the flag exists to
+    /// prevent. Same reasoning, and the same remedy, as the rate-limit
+    /// back-off in `UsageArchive`.
+    private var bridgedAt: Date? {
+        get { defaults.object(forKey: Self.bridgedAtKey) as? Date }
+        set {
+            if let newValue { defaults.set(newValue, forKey: Self.bridgedAtKey) }
+            else { defaults.removeObject(forKey: Self.bridgedAtKey) }
+        }
+    }
+
+    private static let bridgedAtKey = "antigravityBridgedAt"
+
+    /// Whether the language server has answered recently enough that its
+    /// silence means Antigravity is *closed* rather than *gone*.
     ///
     /// Once it has, a failure is Antigravity being closed or restarted — its
     /// port changes every launch — not an account that cannot be read. Falling
     /// back to the request count then *replaces* a percentage with a plain
     /// number, and a ring that reads 8% one minute and 31 the next looks broken
     /// rather than degraded.
-    private var everBridged = false
+    ///
+    /// Bounded rather than forever, at one whole reset cycle. An Antigravity
+    /// that has been uninstalled should not hold a percentage on screen until
+    /// the end of time; after a week with no answer, the count we can honestly
+    /// take ourselves is the better of the two.
+    private var everBridged: Bool { Self.hasBridged(at: bridgedAt, now: Date()) }
 
-    init(session: URLSession = .shared) {
-        self.session = session
-        self.localSession = URLSession(configuration: .ephemeral,
-                                       delegate: LocalhostTrust(),
-                                       delegateQueue: nil)
+    static let bridgeMemory: TimeInterval = 7 * 24 * 60 * 60
+
+    /// Split out so the window can be tested without a language server.
+    static func hasBridged(at date: Date?, now: Date) -> Bool {
+        guard let date else { return false }
+        return now.timeIntervalSince(date) < bridgeMemory
     }
 
     nonisolated var signInRoute: SignInRoute {
@@ -66,6 +102,36 @@ actor AntigravityProvider: UsageProvider {
     }
 
     func fetchSnapshot() async throws -> ProviderSnapshot {
+        // Antigravity's own language server comes first, and deliberately
+        // *before* the keychain. It holds the client identity Google insists
+        // on, it answers with the same figure Antigravity's own usage panel
+        // shows, and it wants nothing from us — no token, so no keychain read.
+        //
+        // That ordering is the whole fix for the hourly password prompt.
+        // Reading Antigravity's keychain item is what put one on screen: the
+        // item belongs to Google's team, Codenotch's signature is not on its
+        // partition list, and "Always Allow" cannot add it there. Google
+        // rotates the token about once an hour, the cached copy expires with
+        // it, and the next refresh walked into the same locked door — roughly
+        // one prompt an hour, for a credential that was never needed while
+        // Antigravity was running.
+        if let windows = await localQuota(), !windows.isEmpty {
+            bridgedAt = Date()
+            return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
+                                    fidelity: .official, status: .ok, windows: windows,
+                                    // The five-hour window, not the week: it is
+                                    // the limit that actually stops work, and
+                                    // the ring should lead with the one you hit.
+                                    headlineID: "gemini-5h")
+        }
+
+        // Antigravity has answered before and is not answering now: keep the
+        // last percentage, dimmed and dated, rather than swapping in a count.
+        // `credentialExpired` is the store's word for "still true, just old".
+        // Checked before the keychain for the same reason as above — there is
+        // nothing this credential could tell us that would change the answer.
+        if everBridged { throw UsageProviderError.credentialExpired }
+
         let credentials = try AntigravityCredentials.load()
         // Expired is not signed out: Antigravity refreshes this on its own the
         // next time it runs, and the last reading is still true, just old.
@@ -83,7 +149,10 @@ actor AntigravityProvider: UsageProvider {
         )
         request.timeoutInterval = 15
 
-        let (data, response) = try await session.data(for: request)
+        // The body is discarded: this call is here for what its *status* says
+        // about the account, and nothing on screen shows the plan's name any
+        // more. `tier(in:)` stays for the shape it pins in the tests.
+        let (_, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         if status == 401 {
@@ -100,24 +169,7 @@ actor AntigravityProvider: UsageProvider {
         }
         guard status == 200 else { throw UsageProviderError.badResponse(status: status) }
 
-        let tier = Self.tier(in: data)
-
-        // Antigravity's own language server first: it holds the client identity
-        // Google insists on, and answers with the same figure the app's own
-        // usage panel shows.
-        if let windows = await localQuota(), !windows.isEmpty {
-            everBridged = true
-            return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
-                                    fidelity: .official, status: .ok, windows: windows,
-                                    headlineID: "gemini-weekly")
-        }
-
-        // Antigravity has answered before and is not answering now: keep the
-        // last percentage, dimmed and dated, rather than swapping in a count.
-        // `credentialExpired` is the store's word for "still true, just old".
-        if everBridged { throw UsageProviderError.credentialExpired }
-
-        // Then Google directly, which answers for a licensed account.
+        // Google directly, which answers for a licensed account.
         if let windows = try await quota(token: credentials.accessToken), !windows.isEmpty {
             return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                     fidelity: .official, status: .ok, windows: windows)
@@ -217,17 +269,28 @@ actor AntigravityProvider: UsageProvider {
         }
 
         guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else { return [] }
-        let buckets = (decoded.quotaGroups?.flatMap { $0.buckets ?? [] } ?? []) + (decoded.buckets ?? [])
+        // Paired with the group it came from rather than flattened away. The
+        // group names the models and the bucket names the window, and a row
+        // labelled with one of the two is ambiguous the moment there is more
+        // than one of the other — which is exactly what went wrong on the
+        // bridge path. Ungrouped buckets carry no models, and say so by
+        // passing nil.
+        let grouped = (decoded.quotaGroups ?? []).flatMap { group in
+            (group.buckets ?? []).map { (models: group.displayName, bucket: $0) }
+        } + (decoded.buckets ?? []).map { (models: String?.none, bucket: $0) }
 
-        return buckets.compactMap { bucket in
+        return grouped.compactMap { models, bucket in
             guard let limit = bucket.limit, limit > 0,
                   let used = bucket.used, used >= 0, used <= limit * 1.5
             else { return nil }
-            let label = bucket.displayName ?? bucket.name ?? "Usage"
-            return LimitWindow(id: bucket.name ?? label,
-                               label: label,
-                               usedFraction: used / limit,
-                               resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse))
+            return LimitWindow(
+                id: bucket.name ?? bucket.displayName ?? "quota",
+                label: AntigravityBridge.label(models: models,
+                                               bucketId: bucket.name,
+                                               window: nil,
+                                               bucketName: bucket.displayName),
+                usedFraction: used / limit,
+                resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse))
         }
     }
 

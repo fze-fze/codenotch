@@ -78,6 +78,42 @@ make run                # generate, build, launch
 make test               # unit tests
 ```
 
+### Building it yourself
+
+Debug builds sign with an ordinary **Apple Development** certificate, Release
+builds with Developer ID — the two configurations in `project.yml`. Point
+`DEVELOPMENT_TEAM` under `Debug` at your own team (`security find-identity -v
+-p codesigning` names it) and `make run` needs no other edit. Xcode's location
+is taken from `xcode-select -p`, so an Xcode beta is fine.
+
+What matters is that the certificate is *stable*, not that it is Apple's: the
+keychain's ACL remembers a binary's designated requirement, and an ad-hoc
+signature's is its cdhash, which changes on every rebuild. Sign ad-hoc and
+"Always Allow" is forgotten after each `make run`.
+
+**If Antigravity keeps asking for your keychain password**, the gate is the
+item's *partition list*, which the Allow dialogue cannot reach — which is why
+clicking "Always Allow" does not stop it coming back. Antigravity rewrites the
+item each time Google rotates the token, about hourly, and the read behind it
+walks into the same closed door. Codenotch asks the local language server
+first and only falls back to the credential, so a running Antigravity means no
+prompt at all; to fix the underlying grant, run this in Terminal with your own
+team id in place of the last one:
+
+```sh
+security set-generic-password-partition-list \
+  -S teamid:EQHXZ8M8AV,teamid:6WFPL8B9FB,teamid:YOURTEAMID \
+  -s gemini -a antigravity ~/Library/Keychains/login.keychain-db
+```
+
+Google's team id has to stay in the list, or Antigravity starts prompting
+itself.
+
+**Auto-updates point at the author's feed.** `SUFeedURL` in `project.yml` is
+`hivinz.com/appcast.xml` and updates install silently, so a local build will
+eventually meet a release signed by a different identity. Switch
+"Install updates automatically" off in Settings, or drop the key.
+
 ## The honest caveat
 
 No LLM vendor publishes a clean "your session limit is N% used" API. The data layer is

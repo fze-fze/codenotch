@@ -23,9 +23,9 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>SUAutomaticallyUpdate</key>
-	<true/>
+	<false/>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUFeedURL</key>
 	<string>https://hivinz.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
