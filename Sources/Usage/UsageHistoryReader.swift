@@ -91,6 +91,10 @@ actor UsageHistoryReader {
             }
         }
         try Task.checkCancellation()
+        // After the logs, so a thread whose log was read this pass is already
+        // known and its coarse total is not added on top of the detail.
+        backfillArchivedCodexThreads(counts: &fileCounts, warnings: &warnings)
+        try Task.checkCancellation()
         if needsSave && archiveProblem == nil {
             do {
                 try manager.createDirectory(at: archiveURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -101,5 +105,41 @@ actor UsageHistoryReader {
             }
         }
         return Snapshot(records: Array(archive.records.values), files: fileCounts, warnings: warnings)
+    }
+
+    /// Archiving a Codex thread deletes its rollout log, so the detailed reader
+    /// loses it entirely. Codex's own state database still knows what the thread
+    /// spent, and that row is picked up here for threads whose log is gone and
+    /// which contributed nothing earlier.
+    ///
+    /// Unlike the log scan this is not signature-cached: the state database is
+    /// rewritten constantly by a running Codex, and the set of archived threads
+    /// is exactly what changes in it.
+    private func backfillArchivedCodexThreads(counts: inout [UsageAgent: Int],
+                                              warnings: inout [String]) {
+        let files = CodexThreadReader.stateFiles(home: home)
+        guard !files.isEmpty else { return }
+        // Threads the detailed reader already accounts for, by session.
+        let imported = Set(archive.records.values.lazy
+            .filter { $0.agent == .codex }.map(\.session))
+        var failures = 0
+        for url in files {
+            counts[.codex, default: 0] += 1
+            do {
+                for record in try CodexThreadReader.read(url: url, importedSessions: imported).records {
+                    if let existing = archive.records[record.id] {
+                        var merged = existing
+                        merged.tokens = existing.tokens.merging(record.tokens)
+                        archive.records[record.id] = merged
+                    } else {
+                        archive.records[record.id] = record
+                    }
+                    needsSave = true
+                }
+            } catch { failures += 1 }
+        }
+        if failures > 0 {
+            warnings.append("Codex: archived thread totals could not be read from \(failures) state files.")
+        }
     }
 }
