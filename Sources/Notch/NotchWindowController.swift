@@ -23,6 +23,9 @@ final class NotchWindowController {
     var onRefreshProvider: ((String) -> Void)?
     /// Open the settings window, asked for by clicking the handle.
     var onOpenSettings: (() -> Void)?
+    /// Open the Skill Manager. Only reachable from the menu — the handle is
+    /// settings' and there is only one of it.
+    var onOpenSkills: (() -> Void)?
 
     private var panel: NotchPanel?
     private var hostingView: NotchHostingView<NotchRootView>?
@@ -31,6 +34,30 @@ final class NotchWindowController {
     private var clearHoverWork: DispatchWorkItem?
     private var clockTimer: Timer?
     private var cursorTimer: Timer?
+
+    /// What the last `cursorMoved` was answering. Compared against on the next
+    /// call so an identical question is not asked twice — see there.
+    private var lastCursorSample: CursorSample?
+
+    /// Everything `cursorMoved` reads that can change what it decides.
+    ///
+    /// The pointer position is the obvious one. The panel's frame is here
+    /// because the poll exists precisely for the case where the pointer is
+    /// parked and the *notch* moved underneath it. The rest are the model state
+    /// the hit-testing is against: fold state changes which region is live, and
+    /// the number of cells changes where each one sits.
+    private struct CursorSample: Equatable {
+        let cursor: CGPoint
+        let frame: CGRect
+        let isExpanded: Bool
+        let cellCount: Int
+        let hoveredIndex: Int?
+        /// Both of these move the regions without necessarily moving the frame:
+        /// the edge decides which axis is which, and the inset is the band a
+        /// merged hardware notch takes off the top.
+        let edge: NotchEdge
+        let contentInset: CGFloat
+    }
 
     /// Hover in is quick; hover out waits, because the pointer has to cross the
     /// gap between the notch and the card without the card vanishing under it.
@@ -295,6 +322,33 @@ final class NotchWindowController {
 
     private func cursorMoved() {
         guard let panel else { return }
+
+        // Nothing to recompute if nothing it depends on moved.
+        //
+        // This is called from two mouse-event monitors — so once per pointer
+        // event, at whatever rate the mouse reports, which on a trackpad is
+        // every frame — and again from the 0.3s poll below whether or not
+        // anything happened. What follows is not free: it hit-tests several
+        // rectangles, and `tooltipRect` measures a card, which asks the block
+        // message to format itself. Running all of it to conclude "the pointer
+        // is where it was" was most of the app's idle work.
+        //
+        // The sample deliberately includes the panel frame, so the poll still
+        // does its job: a notch that is re-anchored or resized under a parked
+        // pointer changes the frame, the sample differs, and the hover state is
+        // recomputed exactly as before.
+        let sample = CursorSample(
+            cursor: NSEvent.mouseLocation,
+            frame: panel.frame,
+            isExpanded: model.isExpanded,
+            cellCount: model.snapshots.count,
+            hoveredIndex: model.hoveredIndex,
+            edge: model.edge,
+            contentInset: model.contentInset
+        )
+        guard sample != lastCursorSample else { return }
+        lastCursorSample = sample
+
         let local = localCursor(in: panel.frame)
         let overTooltip = model.hoveredIndex
             .flatMap(tooltipRect(index:))
@@ -593,6 +647,20 @@ final class NotchWindowController {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+
+        // Its own group. Everything above is about the readings on the notch;
+        // this is the other half of the app, and it does not belong in the
+        // same run of items as "Refresh now".
+        let skills = NSMenuItem(
+            title: "Skills…",
+            action: #selector(MenuActions.openSkills(_:)),
+            keyEquivalent: ""
+        )
+        skills.target = menuActions
+        skills.isEnabled = true
+        menu.addItem(skills)
+        menu.addItem(.separator())
+
         menu.addItem(
             withTitle: "Quit Codenotch",
             action: #selector(NSApplication.terminate(_:)),
@@ -604,7 +672,8 @@ final class NotchWindowController {
     private lazy var menuActions = MenuActions(
         refresh: { [weak self] in self?.onRefresh?() },
         signIn: { [weak self] index in self?.signInItems[safe: index]?.action() },
-        togglePinned: { [weak self] in self?.togglePinned() }
+        togglePinned: { [weak self] in self?.togglePinned() },
+        openSkills: { [weak self] in self?.onOpenSkills?() }
     )
 }
 
@@ -615,19 +684,23 @@ final class MenuActions: NSObject {
     private let refresh: () -> Void
     private let signIn: (Int) -> Void
     private let pin: () -> Void
+    private let skills: () -> Void
 
     init(
         refresh: @escaping () -> Void,
         signIn: @escaping (Int) -> Void,
-        togglePinned: @escaping () -> Void
+        togglePinned: @escaping () -> Void,
+        openSkills: @escaping () -> Void
     ) {
         self.refresh = refresh
         self.signIn = signIn
         self.pin = togglePinned
+        self.skills = openSkills
     }
 
     @objc func refreshNow(_ sender: Any?) { refresh() }
     @objc func togglePinned(_ sender: Any?) { pin() }
+    @objc func openSkills(_ sender: Any?) { skills() }
 
     @objc func signIn(_ sender: Any?) {
         guard let item = sender as? NSMenuItem else { return }

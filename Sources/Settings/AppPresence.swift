@@ -24,20 +24,6 @@ enum AppPresence: String, CaseIterable, Identifiable {
         }
     }
 
-    var explanation: String {
-        switch self {
-        case .dock:
-            return "A normal app icon in the Dock while Codenotch is running."
-        case .menuBar:
-            return "A small icon in the menu bar instead, and nothing in the Dock."
-        case .hidden:
-            // Said here because choosing this removes every visible way back to
-            // these settings, and finding that out afterwards is too late.
-            return "No icon anywhere. Open Codenotch again from Applications to "
-                 + "bring these settings back."
-        }
-    }
-
     /// `.regular` is the only one that gets a Dock tile. Both others are
     /// accessory apps; what separates them is whether a status item is made.
     var activationPolicy: NSApplication.ActivationPolicy {

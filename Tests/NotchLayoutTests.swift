@@ -464,21 +464,21 @@ final class PreferencesTests: XCTestCase {
 final class ProviderAccountTests: XCTestCase {
     func testSummaryReadsAsASentence() {
         let account = ProviderAccount(
-            label: "someone@example.com", plan: "free", source: "Cursor", manageURL: nil
+            label: "someone@example.com", plan: "free", manageURL: nil
         )
-        XCTAssertEqual(account.summary, "someone@example.com · Free · via Cursor")
+        XCTAssertEqual(account.summary, "someone@example.com · Free")
     }
 
     /// Claude's credential carries no address, so the row still has to say
     /// something useful rather than collapsing to an empty line.
     func testSummarySurvivesAMissingLabel() {
-        let account = ProviderAccount(label: nil, plan: "pro", source: "Claude Code", manageURL: nil)
-        XCTAssertEqual(account.summary, "Pro · via Claude Code")
+        let account = ProviderAccount(label: nil, plan: "pro", manageURL: nil)
+        XCTAssertEqual(account.summary, "Pro")
     }
 
     func testSummarySurvivesAMissingPlan() {
-        let account = ProviderAccount(label: "a@b.c", plan: nil, source: "Codex", manageURL: nil)
-        XCTAssertEqual(account.summary, "a@b.c · via Codex")
+        let account = ProviderAccount(label: "a@b.c", plan: nil, manageURL: nil)
+        XCTAssertEqual(account.summary, "a@b.c")
     }
 
     /// The identity lives in the id token's claims. Decoding is base64url with
@@ -502,6 +502,39 @@ final class ProviderAccountTests: XCTestCase {
     func testAMissingAuthFileIsNotAnAccount() {
         let missing = URL(fileURLWithPath: "/tmp/nope-\(UUID().uuidString).json")
         XCTAssertNil(CodexCredentials.account(from: missing))
+    }
+
+    /// Claude's keychain item carries a plan and no address, so the row named
+    /// a tier and no account while every other row named one. The address is
+    /// in `~/.claude.json`, buried in 50-odd KB of Claude Code's own state.
+    func testItFindsClaudesAddressInItsStateFile() throws {
+        let url = try write(#"""
+        {"tipsHistory":{"a":1},
+         "oauthAccount":{"accountUuid":"u","emailAddress":"someone@example.com",
+                         "organizationType":"claude_pro"},
+         "projects":{}}
+        """#)
+        XCTAssertEqual(ClaudeAccountFile.email(from: url), "someone@example.com")
+    }
+
+    /// Every one of these is a signed-out or half-written file, and none of
+    /// them may become an account row with an empty name in it.
+    func testAnAddresslessStateFileIsNotAnAccount() throws {
+        XCTAssertNil(ClaudeAccountFile.email(from: try write(#"{"projects":{}}"#)))
+        XCTAssertNil(ClaudeAccountFile.email(from: try write(#"{"oauthAccount":{}}"#)))
+        XCTAssertNil(ClaudeAccountFile.email(
+            from: try write(#"{"oauthAccount":{"emailAddress":"   "}}"#)))
+        XCTAssertNil(ClaudeAccountFile.email(from: try write("not json")))
+        XCTAssertNil(ClaudeAccountFile.email(
+            from: URL(fileURLWithPath: "/tmp/nope-\(UUID().uuidString).json")))
+    }
+
+    private func write(_ text: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-\(UUID().uuidString).json")
+        try Data(text.utf8).write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
     }
 }
 
@@ -529,7 +562,7 @@ final class ProviderAccountDispatchTests: XCTestCase {
             throw UsageProviderError.needsAuth
         }
         func account() -> ProviderAccount? {
-            ProviderAccount(label: "a@b.c", plan: "pro", source: "Test", manageURL: nil)
+            ProviderAccount(label: "a@b.c", plan: "pro", manageURL: nil)
         }
     }
 
@@ -572,7 +605,7 @@ final class ProviderGlyphTests: XCTestCase {
     }
 
     func testEveryGlyphResolvesAnOutline() {
-        for glyph in [ProviderGlyph.claude, .openai, .third, .cursor, .antigravity] {
+        for glyph in [ProviderGlyph.claude, .openai, .third, .cursor, .antigravity, .grok] {
             XCTAssertFalse(glyph.outline.isEmpty, "\(glyph) draws nothing")
         }
     }
@@ -616,18 +649,19 @@ final class NotchVisibilityTests: XCTestCase {
         XCTAssertEqual(Preferences(defaults: defaults).notchVisibility, .onHover)
     }
 
-    /// Hiding removes every other way back into the app, so the option itself
-    /// has to say where the door is.
-    func testHidingExplainsHowToGetBack() {
-        XCTAssertTrue(NotchVisibility.hidden.explanation.contains("Applications"))
-    }
-
     func testEveryModeIsOfferedAndNamed() {
         XCTAssertEqual(NotchVisibility.allCases.count, 3)
         for mode in NotchVisibility.allCases {
             XCTAssertFalse(mode.title.isEmpty)
-            XCTAssertFalse(mode.explanation.isEmpty)
         }
+    }
+
+    /// "Hide" and "Neither" each remove every visible way back into this
+    /// window, so the control has to say where the door is. Asserted on the
+    /// string the pickers carry — the enums each used to hold a wording of
+    /// their own that no screen ever showed.
+    func testTheControlSaysHowToGetBack() {
+        XCTAssertTrue(SettingsView.wayBack.contains("Applications"))
     }
 }
 
@@ -831,7 +865,8 @@ final class StatusMessageHeightTests: XCTestCase {
             ("ok", .ok)
         ]
         return [("claude", "Claude"), ("cursor", "Cursor"),
-                ("codex", "Codex"), ("gemini", "Antigravity")].flatMap { id, name in
+                ("codex", "Codex"), ("gemini", "Antigravity"),
+                ("grok", "Grok")].flatMap { id, name in
             states.map { state in
                 ("\(id)/\(state.0)",
                  ProviderSnapshot(id: id, displayName: name, glyph: .claude,

@@ -62,6 +62,37 @@ actor AntigravityProvider: UsageProvider {
 
     private static let bridgedAtKey = "antigravityBridgedAt"
 
+    /// What the language server last said about the account.
+    ///
+    /// Persisted for the same reason `bridgedAt` is: it is a fact about the
+    /// account rather than about this run of the app, and the settings sheet
+    /// asks for it synchronously while the call that produces it is async.
+    /// Kept no longer than the bridge memory — an install signed out a week
+    /// ago should not still be showing somebody's address.
+    struct StoredAccount: Codable, Equatable {
+        var email: String?
+        var name: String?
+        var plan: String?
+        var at: Date
+    }
+
+    private var storedAccount: StoredAccount? {
+        get { Self.readStoredAccount(from: defaults) }
+        set {
+            if let newValue, let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Self.accountKey)
+            } else {
+                defaults.removeObject(forKey: Self.accountKey)
+            }
+        }
+    }
+
+    private static let accountKey = "antigravityAccount"
+
+    /// How long a stored account is trusted before it is asked for again.
+    /// The answer is 25 KB and the plan does not change hourly.
+    static let accountRefreshInterval: TimeInterval = 6 * 60 * 60
+
     /// Whether the language server has answered recently enough that its
     /// silence means Antigravity is *closed* rather than *gone*.
     ///
@@ -92,13 +123,59 @@ actor AntigravityProvider: UsageProvider {
     nonisolated func forgetCachedCredential() { AntigravityCredentials.forgetCached() }
 
     nonisolated func account() -> ProviderAccount? {
+        // The language server first, and not only because it knows more. It
+        // wants nothing from us, while the keychain item belongs to Google's
+        // team and answering for it is what used to put a password prompt on
+        // screen — the same ordering, and the same reason, as `fetchSnapshot`.
+        if let stored = Self.readStoredAccount(from: defaults) {
+            return ProviderAccount(
+                label: stored.email ?? stored.name,
+                plan: stored.plan,
+                manageURL: Self.manageURL
+            )
+        }
         guard let credentials = try? AntigravityCredentials.load() else { return nil }
         return ProviderAccount(
-            label: nil,   // the token carries no address
-            plan: credentials.authMethod == "consumer" ? "Personal" : credentials.authMethod,
-            source: "Antigravity",
-            manageURL: URL(string: "https://antigravity.google")
+            label: Self.label(authMethod: credentials.authMethod),
+            plan: nil,   // the token carries no tier — see `label(authMethod:)`
+            manageURL: Self.manageURL
         )
+    }
+
+    private static let manageURL = URL(string: "https://antigravity.google")
+
+    /// The read half of `storedAccount`, reachable from `nonisolated` code.
+    nonisolated static func readStoredAccount(from defaults: UserDefaults) -> StoredAccount? {
+        guard let data = defaults.data(forKey: accountKey),
+              let stored = try? JSONDecoder().decode(StoredAccount.self, from: data),
+              hasBridged(at: stored.at, now: Date())
+        else { return nil }
+        return stored
+    }
+
+    /// Asks the language server whose account this is, at most every few
+    /// hours. Failure is silent: the account line is worth an answer, not a
+    /// broken reading.
+    private func refreshStoredAccount() async {
+        if let stored = storedAccount,
+           Date().timeIntervalSince(stored.at) < Self.accountRefreshInterval { return }
+        guard let bridge,
+              let status = await AntigravityBridge.userStatus(from: bridge, session: localSession)
+        else { return }
+        storedAccount = StoredAccount(email: status.email, name: status.name,
+                                      plan: status.plan, at: Date())
+    }
+
+    /// What the stored token can honestly be said to say about the account.
+    ///
+    /// Not much: it carries no address and no plan. `auth_method` separates a
+    /// personal Google account from a managed one and nothing else, so Pro and
+    /// free are indistinguishable here. It used to be printed in the *plan*
+    /// slot as "Personal", sitting next to Claude's "Pro" and Codex's "Plus"
+    /// on the row of somebody paying for Antigravity Pro — a tier that does
+    /// not exist, invented by putting the kind of account where the plan goes.
+    nonisolated static func label(authMethod: String) -> String {
+        authMethod == "consumer" ? "Personal Google account" : authMethod
     }
 
     func fetchSnapshot() async throws -> ProviderSnapshot {
@@ -117,6 +194,7 @@ actor AntigravityProvider: UsageProvider {
         // Antigravity was running.
         if let windows = await localQuota(), !windows.isEmpty {
             bridgedAt = Date()
+            await refreshStoredAccount()
             return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                     fidelity: .official, status: .ok, windows: windows,
                                     // The five-hour window, not the week: it is

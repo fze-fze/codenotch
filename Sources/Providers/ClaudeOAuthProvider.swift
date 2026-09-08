@@ -180,9 +180,12 @@ actor ClaudeOAuthProvider: UsageProvider {
     nonisolated func account() -> ProviderAccount? {
         guard let credentials = try? ClaudeCredentials.load() else { return nil }
         return ProviderAccount(
-            label: nil,   // the credential carries no address
+            // The keychain item carries the plan; the address is next to it in
+            // `~/.claude.json`. Still gated on the credential loading, because
+            // the row's green dot means a reading is arriving, and a file left
+            // behind by a sign-out would otherwise light it.
+            label: ClaudeAccountFile.email(),
             plan: credentials.subscriptionType,
-            source: "Claude Code",
             manageURL: URL(string: "https://claude.ai/settings/usage")
         )
     }
@@ -192,13 +195,9 @@ actor ClaudeOAuthProvider: UsageProvider {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         // Timestamps come back with fractional seconds and an offset, which
         // `.iso8601` alone will not parse.
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
         decoder.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
-            if let date = withFraction.date(from: text) ?? plain.date(from: text) { return date }
+            if let date = ISO8601Stamp.date(from: text) { return date }
             throw DecodingError.dataCorrupted(
                 .init(codingPath: decoder.codingPath, debugDescription: "Unparseable date \(text)")
             )

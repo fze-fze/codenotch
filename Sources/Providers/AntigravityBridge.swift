@@ -33,6 +33,10 @@ enum AntigravityBridge {
 
     private static let service =
         "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+    /// The only place the account's address and plan are written down. The
+    /// stored token carries neither.
+    private static let statusService =
+        "/exa.language_server_pb.LanguageServerService/GetUserStatus"
 
     // MARK: - Finding it
 
@@ -273,6 +277,70 @@ enum AntigravityBridge {
         }
         name = name.trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? nil : name
+    }
+
+    // MARK: - Who the account belongs to
+
+    /// Whose account Antigravity is signed in to, and on which plan.
+    struct UserStatus: Equatable {
+        let email: String?
+        let name: String?
+        /// Google's own word for the tier — "Pro", "Free", "Teams".
+        let plan: String?
+    }
+
+    static func userStatus(from endpoint: Endpoint, session: URLSession) async -> UserStatus? {
+        for port in endpoint.ports {
+            var request = URLRequest(
+                url: URL(string: "https://127.0.0.1:\(port)\(statusService)")!
+            )
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(endpoint.csrfToken, forHTTPHeaderField: csrfHeader)
+            request.httpBody = Data("{}".utf8)
+            request.timeoutInterval = 10
+
+            guard let (data, response) = try? await session.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let status = userStatus(in: data)
+            else { continue }
+            return status
+        }
+        return nil
+    }
+
+    /// Split out from the request so the shape can be pinned in tests.
+    ///
+    /// The answer is a 25 KB object, nearly all of it the model catalogue.
+    /// Three fields of it are read and the rest is thrown away.
+    static func userStatus(in data: Data) -> UserStatus? {
+        struct Response: Decodable {
+            struct PlanInfo: Decodable { let planName: String? }
+            struct PlanStatus: Decodable { let planInfo: PlanInfo? }
+            struct Status: Decodable {
+                let name: String?
+                let email: String?
+                let planStatus: PlanStatus?
+            }
+            let userStatus: Status?
+        }
+
+        guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
+              let status = decoded.userStatus
+        else { return nil }
+
+        let result = UserStatus(email: status.email.flatMap(nonEmpty),
+                                name: status.name.flatMap(nonEmpty),
+                                plan: status.planStatus?.planInfo?.planName.flatMap(nonEmpty))
+        // An answer with none of the three is no answer. Signed out, the
+        // server still replies 200 with an empty shell.
+        guard result != UserStatus(email: nil, name: nil, plan: nil) else { return nil }
+        return result
+    }
+
+    private static func nonEmpty(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: - Plumbing

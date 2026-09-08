@@ -42,19 +42,43 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     let used: Int?
     /// Nil when the provider does not say when the window rolls over.
     let resetsAt: Date?
+    /// The id of the window this one is a *slice of*, when it has no allowance
+    /// of its own.
+    ///
+    /// Grok meters one weekly limit and then says which products ate it: 25%
+    /// spent, of which Grok Build 13 and Grok Chat 12. Those two are shares of
+    /// the same pool, not pools — so the usual "13% Used · 87% left" is a lie
+    /// on that row, because 87% of nothing is left to Grok Build specifically.
+    /// What is left is 75%, and it belongs to the window named here.
+    ///
+    /// Optional, and not merely for tidiness: `LimitWindow` is archived, and an
+    /// optional is what lets a reading written before this field existed still
+    /// decode.
+    let shareOf: String?
+
+    /// Whether this window owns the allowance it is reporting against.
+    var isShare: Bool { shareOf != nil }
 
     init(id: String, label: String, usedFraction: Double? = nil,
-         remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil) {
+         remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil,
+         shareOf: String? = nil) {
         self.id = id
         self.label = label
         self.usedFraction = usedFraction
         self.remaining = remaining
         self.used = used
         self.resetsAt = resetsAt
+        self.shareOf = shareOf
     }
 
     /// What the tooltip says on the line under the bar.
     var summary: String {
+        if let usedFraction, isShare {
+            // A slice of somebody else's allowance can only honestly state its
+            // own size. Printing what is "left" here would answer a question
+            // this row is not the subject of.
+            return "\(Int((usedFraction * 100).rounded()))% of limit"
+        }
         if let usedFraction {
             // Both ends of the same figure. Vendors do not agree on which to
             // show — Codex writes "87% remaining", Claude writes "% used" — so
@@ -90,15 +114,12 @@ struct UsageBlock: Equatable {
     /// The line the tooltip leads with.
     func summary(now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let resetsAt, resetsAt > now else { return reason }
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = .current
         // The same clock the vendor's own banner uses — "4:13 PM" — rather
         // than a countdown, because that is what you are waiting for.
-        formatter.dateFormat = ResetCopy.daysApart(from: now, to: resetsAt,
+        let style: DateStyle = ResetCopy.daysApart(from: now, to: resetsAt,
                                                    calendar: calendar) >= 1
-            ? "E h:mm a" : "h:mm a"
-        return "\(reason) until \(formatter.string(from: resetsAt))"
+            ? .weekdayAndTime : .timeOnly
+        return "\(reason) until \(style.string(resetsAt, calendar: calendar))"
     }
 }
 
@@ -169,10 +190,10 @@ struct ProviderSnapshot: Identifiable, Equatable {
         switch status {
         case .needsAuth:      return authPrompt
         case .accessDenied:
-            // Says what happened and what fixes it. "Sign in to Claude Code"
+            // Says who refused and what fixes it. "Sign in to Claude Code"
             // would send someone who *is* signed in to fix the wrong thing.
-            return "Codenotch was refused access to \(displayName)'s saved "
-                 + "login. Click this ring to ask again, and choose Always Allow."
+            return "macOS refused access to \(displayName)'s saved login — "
+                 + "click the ring to ask again and choose Always Allow"
         case .unsupported(let why): return why
         case .error(let why): return "Couldn't read usage — \(why)"
         case .stale, .ok:     return "Waiting for the first reading…"

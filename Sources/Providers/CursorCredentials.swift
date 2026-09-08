@@ -31,7 +31,6 @@ struct CursorCredentials {
         return ProviderAccount(
             label: email,
             plan: value("cursorAuth/stripeMembershipType"),
-            source: "Cursor",
             manageURL: URL(string: "https://cursor.com/dashboard")
         )
     }

@@ -11,14 +11,12 @@ panel leads with, so the two never disagree.
 
 ![Collapsed notch with hover tooltip](docs/design/frame-124-hover-tooltip.png)
 
-Settings show which account each reading belongs to, with one switch per
-provider. Switching on takes you to that account's sign-in — the owning app,
-for Cursor, Codex and Antigravity; Claude Code is a command with nothing to
-open, so its row is guidance instead.
-Switching off stops the credential being read and forgets the readings taken from
-it, so the numbers do not come back on the next launch. What it cannot do is sign
-you out of Claude Code or Cursor: those sessions are theirs, and the row says so
-rather than leaving you to find out.
+Settings show which account each reading belongs to and whether it is coming
+through — and nothing more. That list used to carry a switch per provider plus
+buttons to open, switch and re-authorise each account, and every one of them
+acted on an account Codenotch does not own: the reading is borrowed from a tool
+that already holds the login, so the honest place to change any of it is that
+tool. Sign in or out there and the reading here follows.
 Settings live in an orb below the notch — an arc in the corner at rest, a gear
 when you reach for it. It folds away when you are not looking at it: at rest it is a small pill on the
 screen edge, and it unfolds when the pointer reaches it. Click to pin it open.
@@ -49,8 +47,56 @@ Cursor and Codex are wired up too, both reading locally: Cursor borrows the
 editor's own session from its SQLite state store, and Codex reads the rate-limit
 snapshots it writes into its own rollout logs — no credential, no network.
 Antigravity is read the same way, through the language server it runs itself.
+Grok borrows the CLI's own session from `~/.grok/auth.json` and asks the same
+credits billing endpoint `grok /usage` does. There is one weekly limit, and the
+ring is how much of it is gone; the card then breaks that figure down by
+product — Grok Build, Grok Chat — as *shares of the same limit* rather than as
+limits of their own, so those rows say "13% of limit" and only the limit itself
+says what is left. The plan's name comes from `/v1/settings`, because the
+billing endpoints state percentages and never say which tier they belong to. Its
+ring spins while a Grok TUI is mid-turn, read from the sessions it lists in
+`~/.grok`.
 Run with `CODENOTCH_DEMO=1` to see the design frame's three-provider layout with
 its numbers.
+
+## Skills
+
+The other half of the app, reached from **Skills…** in the notch's right-click
+menu, the menu bar item, or Settings. A skill is a folder with a `SKILL.md` in
+it, and the five agents above will each read one — but not from the same place,
+so a skill written once ends up copied four times and the copies drift.
+
+The library is `~/.agents/skills`, which is not a folder of Codenotch's own:
+it is the one **Codex, Cursor and Grok already read** with no configuration. So
+three of the five are served by a skill merely being in it, and only Claude Code
+(`~/.claude/skills`) and Antigravity (`~/.gemini/config/skills`) need anything —
+a symlink pointing back at the library. One real copy of every skill, edited
+once.
+
+That gives the rule the whole feature rests on: **a mount is a symlink into the
+library, and nothing else is ever removed.** A real folder already sitting in an
+agent's directory is somebody's own work; a symlink pointing somewhere else is
+somebody's deliberate arrangement, very likely another tool's. Both are reported
+as conflicts and left exactly where they are. Removing a skill from the library
+moves it to the Trash rather than deleting it. The same rule is what lets
+Codenotch and `yibie/skills-manager` share a machine without fighting.
+
+Reading the library and having a folder of your own are different things, and
+every agent has both. `~/.codex/skills` alone holds fifteen skills that reach
+Codex and nothing else, so the sidebar lists them under **Codex only** — one
+group per agent, beside the global set. Skills get in by **promoting** one of
+those: the folder moves into the library and a link goes back where it was, so
+the agent that had it keeps it and every other agent gains it. There is no
+marketplace and no import-from-URL.
+
+The vendors' own bundled skills — `~/.codex/skills/.system`,
+`~/.cursor/skills-cursor`, `~/.grok/bundled/skills`, about fifty between them —
+are never shown. They are read-only and not yours, so there is nothing to be
+done to one.
+
+- Design spec: [`docs/specs/2026-09-07-skill-manager-design.md`](docs/specs/2026-09-07-skill-manager-design.md)
+
+## Docs
 
 - Design spec: [`docs/specs/2026-08-28-usage-notch-design.md`](docs/specs/2026-08-28-usage-notch-design.md)
 - Implementation plan: [`docs/plans/2026-08-28-usage-notch-plan.md`](docs/plans/2026-08-28-usage-notch-plan.md)

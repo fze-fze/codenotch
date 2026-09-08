@@ -60,11 +60,18 @@ struct ClaudeSessionRecord {
     /// `procStart` looks like "Fri Aug 28 05:15:20 2026" — a ctime string, in
     /// **UTC**, with the day of month space-padded on single-digit days.
     static func parseProcStart(_ text: String) -> Date? {
+        let collapsed = text.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        return ctime.date(from: collapsed)
+    }
+
+    /// Fixed in every respect — POSIX locale, UTC, one pattern — so it is built
+    /// once. It was being built per session file, and the directory is
+    /// rescanned every five seconds and again on every file event.
+    private static let ctime: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "EEE MMM d HH:mm:ss yyyy"
-        let collapsed = text.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
-        return formatter.date(from: collapsed)
-    }
+        return formatter
+    }()
 }

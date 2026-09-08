@@ -15,6 +15,26 @@ final class AntigravityCredentialsTests: XCTestCase {
     "expiry":"2126-08-31T21:53:49.575961+07:00","refresh_token":"r","token_type":"Bearer"}}
     """
 
+    /// `auth_method` is not a plan, and the settings row must not print it as
+    /// one. It said "Personal" in the plan slot, next to Claude's "Pro" and
+    /// Codex's "Plus", on the account of somebody paying for Antigravity Pro.
+    /// The token carries no tier at all, so the row says what kind of account
+    /// it is and claims no plan.
+    func testTheAuthMethodIsNotShownAsAPlan() throws {
+        let creds = try XCTUnwrap(AntigravityCredentials.decode(stored(payload)))
+        let label = AntigravityProvider.label(authMethod: creds.authMethod)
+        XCTAssertEqual(label, "Personal Google account")
+        XCTAssertEqual(ProviderAccount(label: label, plan: nil, manageURL: nil).summary,
+                       "Personal Google account",
+                       "No plan is claimed — the token carries no tier")
+    }
+
+    /// A managed install is left as whatever Google called it rather than
+    /// being guessed at.
+    func testAnUnknownAuthMethodIsPassedThrough() {
+        XCTAssertEqual(AntigravityProvider.label(authMethod: "enterprise"), "enterprise")
+    }
+
     func testItDecodesTheGoKeyringEnvelope() throws {
         let creds = try XCTUnwrap(AntigravityCredentials.decode(stored(payload)))
         XCTAssertEqual(creds.accessToken, "ya29.token")
@@ -334,6 +354,46 @@ final class AntigravityBridgeTests: XCTestCase {
                    "remainingFraction":1,
                    "resetTime":"2026-09-06T02:22:12Z"}]}]}}
     """.utf8)
+
+    /// Trimmed from a real `GetUserStatus`, which answers with 25 KB of model
+    /// catalogue around these four fields.
+    private let status = Data("""
+    {"userStatus":{"name":"Zeen Fan","email":"someone@example.com",
+      "planStatus":{"planInfo":{"teamsTier":"TEAMS_TIER_PRO","planName":"Pro",
+                                "monthlyPromptCredits":50000},
+                    "availablePromptCredits":500},
+      "cascadeModelConfigData":{"clientModelConfigs":[{"label":"Gemini 3.8 Flash (Low)"}]}}}
+    """.utf8)
+
+    /// The plan the stored token does not carry. Antigravity's own language
+    /// server does, and it is the difference between a Pro account reading as
+    /// "Pro" and reading as the auth method that stood in for it.
+    func testItReadsTheAccountAndPlan() throws {
+        let read = try XCTUnwrap(AntigravityBridge.userStatus(in: status))
+        XCTAssertEqual(read.email, "someone@example.com")
+        XCTAssertEqual(read.name, "Zeen Fan")
+        XCTAssertEqual(read.plan, "Pro")
+        XCTAssertEqual(
+            ProviderAccount(label: read.email, plan: read.plan, manageURL: nil).summary,
+            "someone@example.com · Pro"
+        )
+    }
+
+    /// Signed out, the server still answers 200 with an empty shell — which
+    /// must not become an account row with nothing in it.
+    func testAnEmptyStatusIsNoStatus() {
+        XCTAssertNil(AntigravityBridge.userStatus(in: Data(#"{"userStatus":{}}"#.utf8)))
+        XCTAssertNil(AntigravityBridge.userStatus(
+            in: Data(#"{"userStatus":{"email":"  ","planStatus":{"planInfo":{}}}}"#.utf8)))
+        XCTAssertNil(AntigravityBridge.userStatus(in: Data("not json".utf8)))
+        XCTAssertNil(AntigravityBridge.userStatus(in: Data(#"{"somethingElse":1}"#.utf8)))
+    }
+
+    /// A quota answer is not a status answer. Handing one to the other parser
+    /// is what a wrong port would do.
+    func testAQuotaAnswerIsNotMistakenForAStatus() {
+        XCTAssertNil(AntigravityBridge.userStatus(in: real))
+    }
 
     /// The server reports what is *left*; the notch shows what is spent.
     /// Inverting it here rather than in the view keeps a percentage meaning the
@@ -678,13 +738,6 @@ final class AccountDestinationTests: XCTestCase {
         XCTFail("guidance should not carry an app")
     }
 
-    /// Naming the app rather than a host is the whole point: the button says
-    /// where it actually goes.
-    func testTitlesNameTheirDestination() {
-        XCTAssertEqual(SignInRoute.openApp(bundleID: "x", name: "Cursor").actionTitle,
-                       "Open Cursor")
-    }
-
     /// An app that is not installed must not be offered — the button would do
     /// nothing, which is worse than no button.
     func testAnUninstalledAppIsNotOffered() {
@@ -745,17 +798,10 @@ final class AppPresenceTests: XCTestCase {
         XCTAssertFalse(AppPresence.hidden.wantsStatusItem)
     }
 
-    /// Choosing this removes every visible way back into settings, so the
-    /// option itself has to say where the door is.
-    func testHidingExplainsHowToGetBack() {
-        XCTAssertTrue(AppPresence.hidden.explanation.contains("Applications"))
-    }
-
-    func testEveryModeIsNamedAndExplained() {
+    func testEveryModeIsNamed() {
         XCTAssertEqual(AppPresence.allCases.count, 3)
         for mode in AppPresence.allCases {
             XCTAssertFalse(mode.title.isEmpty)
-            XCTAssertFalse(mode.explanation.isEmpty)
         }
     }
 

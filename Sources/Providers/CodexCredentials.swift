@@ -23,7 +23,6 @@ enum CodexCredentials {
         return ProviderAccount(
             label: claims["email"] as? String,
             plan: auth?["chatgpt_plan_type"] as? String,
-            source: "Codex",
             manageURL: URL(string: "https://chatgpt.com/#settings/Account")
         )
     }

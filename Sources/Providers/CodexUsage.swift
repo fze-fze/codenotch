@@ -60,11 +60,6 @@ enum CodexUsage {
     /// instantly, even when Codex last wrote to it days ago. Without this the
     /// provider reported a three-day-old percentage as a live one.
     static func recordedAt(inRollout text: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-
         // Last line first: the newest snapshot is at the end.
         for line in text.split(separator: "\n").reversed() where line.contains("rate_limits") {
             guard let data = line.data(using: .utf8),
@@ -72,7 +67,7 @@ enum CodexUsage {
                   let dictionary = object as? [String: Any],
                   let stamp = dictionary["timestamp"] as? String
             else { continue }
-            if let date = formatter.date(from: stamp) ?? plain.date(from: stamp) { return date }
+            if let date = ISO8601Stamp.date(from: stamp) { return date }
         }
         return nil
     }

@@ -6,6 +6,10 @@ enum ProviderGlyph: String, Codable, Equatable {
     case openai
     case third
     case cursor
+    /// Worn by both halves of the app: the Grok CLI's usage ring, and the
+    /// Skill Manager, where Grok is one of the five agents skills are
+    /// distributed to.
+    case grok
     /// The raw value stays `gemini`: it is the key archived readings were
     /// written under, and renaming it would make every stored reading for this
     /// provider undecodable.
@@ -33,6 +37,7 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .openai: return 0.94
         case .antigravity: return 1.0
         case .third:  return 1.0
+        case .grok:   return 1.0
         }
     }
 
@@ -43,6 +48,7 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .third:  return GlyphOutline.third
         case .cursor: return GlyphOutline.cursor
         case .antigravity: return GlyphOutline.antigravity
+        case .grok:   return GlyphOutline.grok
         }
     }
 }

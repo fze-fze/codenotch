@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: UsageStore?
     private var monitors: [String: any AgentActivityMonitor] = [:]
     private var preferences: Preferences?
-    private var settings: SettingsWindowController?
+    private var panel: PanelWindowController?
     private var statusItem: StatusItemController?
     private var cancellables = Set<AnyCancellable>()
 
@@ -31,13 +31,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let controller = NotchWindowController()
 
+        // Built outside the demo branch below: the Skill half reads no provider
+        // and no credential, so it works the same whether the notch is showing
+        // real readings or the design frame's.
+        let skillsModel = SkillManagerModel()
+
         // `CODENOTCH_DEMO=1` puts the design frame's three providers on screen
         // with its numbers, for screenshots and for eyeballing the layout.
-        if ProcessInfo.processInfo.environment["CODENOTCH_DEMO"] == "1" {
+        let isDemo = ProcessInfo.processInfo.environment["CODENOTCH_DEMO"] == "1"
+        let preferences = Preferences()
+        self.preferences = preferences
+        // Before any window exists. Applied after one is on screen, the panel
+        // opens in the system appearance and then repaints, which reads as a
+        // flash of the wrong theme on every launch.
+        preferences.appearance.apply()
+
+        if isDemo {
             controller.model.snapshots = Fixtures.snapshots()
+            let panel = PanelWindowController(preferences: preferences,
+                                              providers: { [] },
+                                              skills: skillsModel)
+            controller.onOpenSettings = { [weak panel] in panel?.show(.settings) }
+            controller.onOpenSkills = { [weak panel] in panel?.show(.skills) }
+            self.panel = panel
         } else {
-            let preferences = Preferences()
-            self.preferences = preferences
 
             // Cursor reads the editor's own session rather than a browser one:
             // signing into cursor.com separately created a second, empty account.
@@ -48,7 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // switched-off ones once the binding below delivered.
             let store = UsageStore(
                 providers: [ClaudeOAuthProvider(), CursorLocalProvider(),
-                            CodexLocalProvider(), AntigravityProvider()],
+                            CodexLocalProvider(), AntigravityProvider(),
+                            GrokLocalProvider()],
                 disconnected: preferences.disconnectedProviders
             )
 
@@ -59,23 +77,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // right-hand one and then crossfades away from it.
             controller.model.edge = preferences.notchEdge
 
-            let settings = SettingsWindowController(
+            let panel = PanelWindowController(
                 preferences: preferences,
-                // A closure so the sheet re-reads accounts each time it comes
+                // A closure so the page re-reads accounts each time it comes
                 // forward; a snapshot here is what made a switched account keep
                 // showing the old address until the app restarted.
                 providers: { [weak store] in store?.providerSummaries ?? [] },
-                signOut: { [weak store] in store?.signOut(providerID: $0) },
-                signIn: { [weak store] in store?.signIn(providerID: $0) ?? false },
-                switchAccount: { [weak store] in
-                    store?.openAccountSource(providerID: $0) ?? false
-                },
-                retry: { [weak store] in store?.reauthorize(providerID: $0) }
+                skills: skillsModel
             )
-            controller.onOpenSettings = { [weak settings] in settings?.show() }
-            self.settings = settings
+            controller.onOpenSettings = { [weak panel] in panel?.show(.settings) }
+            controller.onOpenSkills = { [weak panel] in panel?.show(.skills) }
+            self.panel = panel
 
-            let statusItem = StatusItemController { [weak settings] in settings?.show() }
+            let statusItem = StatusItemController(
+                onOpenSettings: { [weak panel] in panel?.show(.settings) },
+                onOpenSkills: { [weak panel] in panel?.show(.skills) }
+            )
             self.statusItem = statusItem
 
             preferences.$appPresence
@@ -127,7 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "claude": ClaudeSessionMonitor(),
             "cursor": CursorActivityMonitor(),
             "codex": CodexActivityMonitor(),
-            "gemini": AntigravityActivityMonitor()
+            "gemini": AntigravityActivityMonitor(),
+            "grok": GrokActivityMonitor()
         ]
         for (id, monitor) in monitors {
             monitor.sessionsPublisher
@@ -163,10 +181,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// With no dock icon, no menu bar item and no notch on screen, there is
     /// otherwise nothing left to click — choosing Hide would be a one-way door.
     /// Launching the app again while it is already running lands here, so
-    /// opening it from Applications or Spotlight reopens settings.
+    /// opening it from Applications or Spotlight puts the panel back up.
+    ///
+    /// It opens on the panel's own default page rather than naming one. That
+    /// used to be Settings, on the grounds that this is the rescue hatch and
+    /// Settings is where the notch gets switched back on. It still is: the tabs
+    /// are along the top of the window this returns, so Settings is one click
+    /// from wherever it lands. Nothing about the door being open depended on
+    /// which page it opened onto.
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows: Bool) -> Bool {
-        settings?.show()
+        panel?.show()
         return true
     }
 

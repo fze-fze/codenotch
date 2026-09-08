@@ -9,9 +9,11 @@ import AppKit
 final class StatusItemController {
     private var item: NSStatusItem?
     private let onOpenSettings: () -> Void
+    private let onOpenSkills: () -> Void
 
-    init(onOpenSettings: @escaping () -> Void) {
+    init(onOpenSettings: @escaping () -> Void, onOpenSkills: @escaping () -> Void) {
         self.onOpenSettings = onOpenSettings
+        self.onOpenSkills = onOpenSkills
     }
 
     var isShowing: Bool { item != nil }
@@ -24,6 +26,9 @@ final class StatusItemController {
         item.button?.toolTip = "Codenotch"
 
         let menu = NSMenu()
+        menu.addItem(
+            withTitle: "Skills…", action: #selector(openSkills), keyEquivalent: ""
+        ).target = self
         menu.addItem(
             withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ","
         ).target = self
@@ -62,5 +67,6 @@ final class StatusItemController {
     }
 
     @objc private func openSettings() { onOpenSettings() }
+    @objc private func openSkills() { onOpenSkills() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

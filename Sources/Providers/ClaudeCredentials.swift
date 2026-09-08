@@ -105,3 +105,31 @@ struct ClaudeCredentials {
         }
     }
 }
+
+/// Whose account Claude Code is signed in to.
+///
+/// Not in the keychain item: that carries a token, an expiry and a plan, and no
+/// address — which is why the settings row said "Pro" and left it at that,
+/// while every other row named an account. Claude Code writes the address to
+/// `~/.claude.json` instead, in the open, alongside everything else it
+/// remembers. No keychain, so no prompt to read it.
+enum ClaudeAccountFile {
+    static var url: URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude.json")
+    }
+
+    /// `JSONSerialization` and not a `Decodable`: the file is 50-odd KB of
+    /// Claude Code's own state — tips, cached flags, per-project history — and
+    /// one field of it is wanted. A struct would have to describe the rest to
+    /// reach it, and would break the day any of it changed shape.
+    static func email(from url: URL = url) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let account = root["oauthAccount"] as? [String: Any],
+              let email = (account["emailAddress"] as? String)?
+                  .trimmingCharacters(in: .whitespaces),
+              !email.isEmpty
+        else { return nil }
+        return email
+    }
+}

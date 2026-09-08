@@ -679,18 +679,6 @@ final class SignOutTests: XCTestCase {
     }
 }
 
-/// The row has to say what signing out here does *not* reach, or someone signs
-/// out expecting to be signed out of Cursor too.
-final class SignOutCaveatTests: XCTestCase {
-    func testItNamesTheAppThatKeepsTheSession() {
-        let route = SignInRoute.openApp(bundleID: "com.example", name: "Cursor")
-        XCTAssertTrue(route.signOutCaveat.contains("Cursor"))
-    }
-
-    func testGuidanceRoutesStillCarryOne() {
-        XCTAssertFalse(SignInRoute.guidance("anything").signOutCaveat.isEmpty)
-    }
-}
 
 
 /// Switching a provider on should take the user to wherever that account signs
@@ -735,7 +723,7 @@ final class SignInRoutingTests: XCTestCase {
     func testItDoesNotOpenAnythingWhenTheAccountIsAlreadyReadable() {
         let stub = Stub()
         stub.stubAccount = ProviderAccount(label: "me@example.com", plan: "pro",
-                                           source: "Stub", manageURL: nil)
+                                           manageURL: nil)
         XCTAssertTrue(store(stub).signIn(providerID: "a"))
         XCTAssertEqual(stub.presented, 0)
     }
@@ -757,20 +745,6 @@ final class SignInRoutingTests: XCTestCase {
     }
 }
 
-/// A provider that owns its session is the one case where signing in and out
-/// are literally true, and the row should say so rather than disclaiming.
-final class ModalRouteCopyTests: XCTestCase {
-    func testTheModalRouteOffersToSignIn() {
-        XCTAssertEqual(SignInRoute.modal(name: "Perplexity").actionTitle,
-                       "Sign in to Perplexity")
-    }
-
-    func testItDoesNotClaimYouStaySignedIn() {
-        let caveat = SignInRoute.modal(name: "Perplexity").signOutCaveat
-        XCTAssertFalse(caveat.contains("stay signed in"),
-                       "a session Codenotch owns really is ended")
-    }
-}
 
 /// Changing account is something you do while already signed in, so the
 /// shortcut `signIn` takes when a credential exists is exactly wrong for it.
@@ -782,7 +756,7 @@ final class SwitchAccountTests: XCTestCase {
         let glyph = ProviderGlyph.claude
         var route: SignInRoute = .modal(name: "Stub")
         var stubAccount: ProviderAccount? = ProviderAccount(
-            label: "me@example.com", plan: "pro", source: "Stub", manageURL: nil
+            label: "me@example.com", plan: "pro", manageURL: nil
         )
         private(set) var presented = 0
 
@@ -816,11 +790,6 @@ final class SwitchAccountTests: XCTestCase {
         XCTAssertEqual(stub.presented, 0)
     }
 
-    func testEveryRouteSaysWhereToSwitch() {
-        XCTAssertTrue(SignInRoute.openApp(bundleID: "x", name: "Cursor")
-            .switchHint.contains("Cursor"))
-        XCTAssertFalse(SignInRoute.guidance("anything").switchHint.isEmpty)
-    }
 }
 
 /// Switching a provider off has to make it gone — from the notch, from memory,

@@ -13,16 +13,27 @@ struct ProviderAccount: Equatable {
     let label: String?
     /// The plan, named the way the provider names it.
     let plan: String?
-    /// Which app's credential this borrows.
-    let source: String
     /// The provider's own usage page, for checking this against the source.
     let manageURL: URL?
 
-    /// One line for the settings row.
+    /// One line for the settings row. Which tool the credential is borrowed
+    /// from used to be tacked on the end — "· via Cursor" on the Cursor row,
+    /// on every row — and the row already says it.
     var summary: String {
-        [label, plan.map { $0.capitalized }, "via \(source)"]
+        [label, plan.map(Self.titled)]
             .compactMap { $0 }
             .joined(separator: " · ")
+    }
+
+    /// Capitalises a wire token, and leaves a display name alone.
+    ///
+    /// Cursor hands over `"pro"`, which has to be title-cased before it can sit
+    /// on a row. Grok hands over `"SuperGrok Heavy"` — already the form Grok
+    /// itself prints — and `capitalized` lowercases the inner capitals of every
+    /// word, so the unconditional call turned a brand into "Supergrok Heavy".
+    /// A plan that already carries a capital has been written for reading.
+    static func titled(_ plan: String) -> String {
+        plan.contains(where: \.isUppercase) ? plan : plan.capitalized
     }
 }
 
@@ -40,45 +51,11 @@ enum SignInRoute: Equatable {
     /// Nothing to launch; Claude Code is a command, not an application.
     case guidance(String)
 
-    var actionTitle: String? {
-        switch self {
-        case .modal(let name):     return "Sign in to \(name)"
-        case .openApp(_, let name): return "Open \(name)"
-        case .guidance:            return nil
-        }
-    }
-
     var explanation: String {
         switch self {
-        case .modal(let name):      return "Sign in to \(name) to read this account."
-        case .openApp(_, let name): return "Sign in with \(name) to read this account."
+        case .modal(let name):      return "Sign in to \(name) to read this account"
+        case .openApp(_, let name): return "Sign in with \(name) to read this account"
         case .guidance(let text):   return text
-        }
-    }
-
-    /// How to change which account is being read.
-    ///
-    /// Always somewhere else: the credential belongs to the tool that issued
-    /// it, so switching accounts is that tool's business and this can only say
-    /// where to go.
-    var switchHint: String {
-        switch self {
-        case .modal(let name):      return "Sign out in the \(name) window to use another account."
-        case .openApp(_, let name): return "Switch accounts in \(name); the notch follows."
-        case .guidance:             return "Switch accounts in the tool that owns it; the notch follows."
-        }
-    }
-
-    /// What switching a provider off does and does not reach, said plainly, so
-    /// nobody switches off here expecting to be signed out of the tool as well.
-    var signOutCaveat: String {
-        switch self {
-        case .modal(let name):
-            return "Signs out of \(name) — the session belongs to Codenotch."
-        case .openApp(_, let name):
-            return "You stay signed in to \(name) — end that session in \(name) itself."
-        case .guidance:
-            return "You stay signed in to the tool that owns the account."
         }
     }
 }

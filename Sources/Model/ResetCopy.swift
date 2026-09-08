@@ -15,17 +15,6 @@ enum ResetCopy {
             return "Resets in \(max(1, minutes)) min"
         }
 
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = .current
-        // The calendar carries a time zone, and `daysApart` below already
-        // counts days in it. A formatter left on the system zone let the two
-        // disagree about the same instant — sorted as "inside the week" by one
-        // zone, then printed with the other's clock. In production both are
-        // the current zone and nothing shows; hand in a different one, as the
-        // tests do, and a reset at noon in Bangkok prints as 1:00 PM.
-        formatter.timeZone = calendar.timeZone
-
         // A weekday only identifies a day inside the coming week. Codex's
         // monthly window resets 26 days out, and "Resets Mon 3:55 PM" read as
         // *this* Monday — six days away rather than nearly four weeks, which is
@@ -33,16 +22,14 @@ enum ResetCopy {
         if daysApart(from: now, to: resetsAt, calendar: calendar) >= 7 {
             // Day and month only, matching how the vendors write it. A time
             // that far out is noise: nobody plans around 3:55 PM in four weeks.
-            formatter.setLocalizedDateFormatFromTemplate("MMM d")
-            return "Resets \(formatter.string(from: resetsAt))"
+            return "Resets \(DateStyle.dayAndMonth.string(resetsAt, calendar: calendar))"
         }
 
         // A literal pattern rather than a localised template: the weekday and
         // AM/PM still come from the locale, but the separator stays a colon.
         // The template form yields "4.50 PM" in some regions, and both the
         // design frame and Claude's own usage panel write "4:50 PM".
-        formatter.dateFormat = "E h:mm a"
-        return "Resets \(formatter.string(from: resetsAt))"
+        return "Resets \(DateStyle.weekdayAndTime.string(resetsAt, calendar: calendar))"
     }
 
     /// Whole days between two instants, counted by calendar day rather than by

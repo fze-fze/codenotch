@@ -25,7 +25,29 @@ struct AntigravityActivity: Equatable {
     /// share the transcript, and counting those would inflate the number with
     /// work the model never did.
     private static let modelSource = "MODEL"
+    /// The same word as bytes, to sieve lines with before paying for JSON.
+    private static let modelMarker = Data(modelSource.utf8)
+    private static let newline = UInt8(ascii: "\n")
 
+    /// Read as bytes, sieved, then decoded — in that order, and none of it more
+    /// than once.
+    ///
+    /// The transcripts are append-only and grow without bound, and this runs on
+    /// every fetch. The first version decoded the whole file to a `String`,
+    /// split it into substrings, converted each substring **back** to `Data`,
+    /// and built a fresh `JSONDecoder` and a fresh `ISO8601DateFormatter` per
+    /// line. On a machine with a few weeks of Antigravity history that is tens
+    /// of thousands of throwaway objects a minute, which is what put this app's
+    /// heap where it was.
+    ///
+    /// Three things changed and none of them alter the answer. The file stays
+    /// `Data`, so slicing it costs nothing and there is no UTF-8 round trip.
+    /// The decoder and the formatters are made once. And a line is only handed
+    /// to the decoder if the bytes `MODEL` appear in it at all — a step whose
+    /// source is `MODEL` always contains them, so nothing that used to be
+    /// counted stops being counted, while the great majority of lines, which
+    /// are user turns and checkpoints, are rejected by a byte search instead of
+    /// a JSON parse.
     static func read(root: URL = transcriptRoot, now: Date = Date()) -> AntigravityActivity {
         let manager = FileManager.default
         guard let trajectories = try? manager.contentsOfDirectory(
@@ -36,15 +58,16 @@ struct AntigravityActivity: Equatable {
         var latest: Date?
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
+        let decoder = JSONDecoder()
 
         for trajectory in trajectories {
             let transcript = trajectory
                 .appendingPathComponent(".system_generated/logs/transcript.jsonl")
-            guard let text = try? String(contentsOf: transcript, encoding: .utf8) else { continue }
+            guard let data = try? Data(contentsOf: transcript) else { continue }
 
-            for line in text.split(separator: "\n") {
-                guard let data = line.data(using: .utf8),
-                      let step = try? JSONDecoder().decode(Step.self, from: data),
+            for line in data.split(separator: newline, omittingEmptySubsequences: true) {
+                guard line.range(of: modelMarker) != nil,
+                      let step = try? decoder.decode(Step.self, from: line),
                       step.source == modelSource,
                       let at = parse(step.created_at)
                 else { continue }
@@ -66,13 +89,7 @@ struct AntigravityActivity: Equatable {
         let source: String?
     }
 
-    static func parse(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: value) { return date }
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value)
-    }
+    static func parse(_ value: String) -> Date? { ISO8601Stamp.date(from: value) }
 
     /// What the cell says. Deliberately a count with the limit's absence stated,
     /// rather than a number that looks like a percentage.

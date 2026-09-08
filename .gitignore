@@ -7,3 +7,16 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .swiftpm/
+
+# Xcode's build-system scratch directory. `make clean` removes it; nothing in
+# it is source.
+.build/
+
+# Skill mounts, which Codenotch writes into a project it manages.
+#
+# They are absolute symlinks into whoever's `~/.codenotch/skills` — this repo
+# is one of the projects the app under development is pointed at, so they
+# appear here as a side effect of using it. Committed, they would land in a
+# clone as links to a home directory that does not exist there.
+.agents/
+.claude/skills

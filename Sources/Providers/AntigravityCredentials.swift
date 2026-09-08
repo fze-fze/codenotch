@@ -87,14 +87,6 @@ struct AntigravityCredentials {
     }
 
     /// Fractional seconds are not optional in this field, but a formatter that
-    /// demands them fails on a whole-second timestamp — so try both.
-    static func parse(_ value: String) -> Date? {
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: value) { return date }
-
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        return plain.date(from: value)
-    }
+    /// demands them fails on a whole-second timestamp — so both are tried.
+    static func parse(_ value: String) -> Date? { ISO8601Stamp.date(from: value) }
 }
