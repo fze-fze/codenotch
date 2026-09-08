@@ -24,12 +24,27 @@ enum SQLiteStore {
             var db: OpaquePointer?
             if sqlite3_open_v2("file:\(url.path)?\(query)", &db,
                                SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK,
-               let db {
+               let db, canRead(db) {
                 return db
             }
             sqlite3_close(db)
         }
         return nil
+    }
+
+    /// `sqlite3_open_v2` allocates the connection before it ever touches the
+    /// file, so `mode=ro` reports success for a write-ahead-logged database
+    /// whose `-shm` sidecar is gone, and only fails at the first statement.
+    /// Taking that handle at its word is worse than failing: it answers every
+    /// query with no rows, so a store full of history reads as an empty one and
+    /// the `immutable=1` fallback below it is never reached. Reading the schema
+    /// is the cheapest proof that the handle can actually see the file.
+    private static func canRead(_ db: OpaquePointer) -> Bool {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, "select count(*) from sqlite_master", -1,
+                                 &statement, nil) == SQLITE_OK else { return false }
+        return sqlite3_step(statement) == SQLITE_ROW
     }
 
     /// Every column of every row, as text. Needed where one row carries more
@@ -47,6 +62,26 @@ enum SQLiteStore {
                 row.append(sqlite3_column_text(statement, index).map { String(cString: $0) } ?? "")
             }
             out.append(row)
+        }
+        return out
+    }
+
+    /// An integer key and a binary payload per row, for stores that keep
+    /// serialized protobuf rather than text. A row whose blob is empty or whose
+    /// key is not an integer is skipped rather than reported: these tables are
+    /// written by another app and may hold rows this build knows nothing about.
+    static func blobRows(in db: OpaquePointer?, sql: String) -> [(index: Int, data: Data)] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+
+        var out: [(index: Int, data: Data)] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard sqlite3_column_type(statement, 0) == SQLITE_INTEGER else { continue }
+            let index = Int(sqlite3_column_int64(statement, 0))
+            let count = Int(sqlite3_column_bytes(statement, 1))
+            guard count > 0, let raw = sqlite3_column_blob(statement, 1) else { continue }
+            out.append((index, Data(bytes: raw, count: count)))
         }
         return out
     }

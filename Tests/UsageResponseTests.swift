@@ -496,6 +496,43 @@ final class SQLiteStoreTests: XCTestCase {
         let missing = URL(fileURLWithPath: "/tmp/nope-\(UUID().uuidString).sqlite")
         XCTAssertNil(SQLiteStore.open(missing))
     }
+
+    /// `sqlite3_open_v2` allocates the connection before it looks at the file,
+    /// so the first `mode=ro` attempt reports success on a file it cannot read
+    /// and only fails at the first statement. Handing that connection back was
+    /// worse than failing: every query answered with no rows, so a store full of
+    /// history read as an empty one — no error, no warning — and the
+    /// `immutable=1` fallback behind it never ran. Antigravity's conversation
+    /// stores are the case that exposed it; Cursor's and Codex's are the same
+    /// shape.
+    func testAConnectionThatCannotReadIsNotReturnedAsSuccess() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("garbage-\(UUID().uuidString).sqlite")
+        try Data("this is plainly not a SQLite file".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertNil(SQLiteStore.open(url), "an unreadable file must fail, not open emptily")
+    }
+
+    func testBlobRowsReadPayloadsAndSkipRowsThatCarryNone() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("blobs-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        for sql in ["CREATE TABLE rows (idx, data);",
+                    "INSERT INTO rows VALUES (7, x'0801');",
+                    "INSERT INTO rows VALUES ('text-key', x'09');",
+                    "INSERT INTO rows VALUES (8, NULL);"] {
+            XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK, sql)
+        }
+        sqlite3_close(db)
+
+        let opened = SQLiteStore.open(url)
+        let rows = SQLiteStore.blobRows(in: opened, sql: "SELECT idx, data FROM rows")
+        sqlite3_close(opened)
+        XCTAssertEqual(rows.map(\.index), [7])
+        XCTAssertEqual(rows.first.map { [UInt8]($0.data) }, [0x08, 0x01])
+    }
 }
 
 /// Switching a provider off is not hiding it. Its credential must not be read

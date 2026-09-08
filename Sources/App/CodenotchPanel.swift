@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The three pages of the app that are not the notch.
+/// The pages of the app that are not the notch.
 enum PanelTab: String, CaseIterable, Identifiable {
     /// Where the readings come from, and how the notch behaves.
     case settings
@@ -9,6 +9,8 @@ enum PanelTab: String, CaseIterable, Identifiable {
     case skills
     /// The folders you work in, and what their agents read there.
     case projects
+    /// Local token history, model breakdowns, and estimated cost.
+    case usage
 
     var id: String { rawValue }
 
@@ -17,6 +19,7 @@ enum PanelTab: String, CaseIterable, Identifiable {
         case .settings: return "Settings"
         case .skills:   return "Skills"
         case .projects: return "Projects"
+        case .usage:    return "Usage"
         }
     }
 
@@ -25,6 +28,7 @@ enum PanelTab: String, CaseIterable, Identifiable {
         case .settings: return "gearshape"
         case .skills:   return "square.stack.3d.up"
         case .projects: return "folder"
+        case .usage:    return "chart.bar.xaxis"
         }
     }
 }
@@ -64,6 +68,12 @@ final class PanelSelection: ObservableObject {
     @Published var tab: PanelTab = .skills
 }
 
+// Measured, so nobody spends the afternoon again: `TabView` on macOS already
+// defers a tab's content until that tab is selected. Wrapping each page in a
+// "build it once it has been visited" view changed the footprint by nothing at
+// all — opening the panel and looking only at Skills cost 46.8 MB either way,
+// against 61.5 MB for looking at all three. The laziness is already there.
+
 /// One window, two pages.
 ///
 /// They were two windows. The split was defensible — a short fixed form is a
@@ -93,6 +103,10 @@ struct CodenotchPanelView: View {
                 .tabItem { Label(PanelTab.projects.title,
                                  systemImage: PanelTab.projects.symbol) }
                 .tag(PanelTab.projects)
+
+            UsagePageView()
+                .tabItem { Label(PanelTab.usage.title, systemImage: PanelTab.usage.symbol) }
+                .tag(PanelTab.usage)
         }
         .frame(minWidth: 820, minHeight: 560)
     }
@@ -145,7 +159,7 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         // Re-read on the way in: the library and every project are shared
         // folders, and the most likely reason to have left this window is to
         // have gone and changed something in one.
-        if tab != .settings { skills.refresh() }
+        if tab == .skills || tab == .projects { skills.refresh() }
 
         if let window {
             surface(window)
