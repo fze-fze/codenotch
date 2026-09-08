@@ -13,6 +13,17 @@ enum UsageLogParser {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Grok stamps its update stream with whole unix seconds rather than the
+    /// ISO-8601 text every other agent writes.
+    static func epochSeconds(_ any: Any?) -> Date? {
+        if let text = any as? String { return ISO8601Stamp.date(from: text) }
+        guard let number = any as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        // Rejects zero, negatives, and anything past the year 2100.
+        guard value.isFinite, value > 0, value < 4_102_444_800 else { return nil }
+        return Date(timeIntervalSince1970: value)
+    }
+
     static func count(_ json: [String: Any], _ key: String) -> Int64 {
         guard let number = json[key] as? NSNumber,
               CFGetTypeID(number) != CFBooleanGetTypeID(),
@@ -25,7 +36,10 @@ enum UsageLogParser {
         if agent == .gemini { return try gemini(Data(contentsOf: url), fallbackSession: key(url.path)) }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
-        var parser = Lines(agent: agent, session: key(url.path))
+        // Grok names the session's folder after the session, so identity
+        // survives the whole tree being moved or copied.
+        let seed = agent == .grok ? url.deletingLastPathComponent().lastPathComponent : url.path
+        var parser = Lines(agent: agent, session: key(seed))
         var pending = Data()
         while let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty {
             try Task.checkCancellation()
@@ -56,7 +70,45 @@ enum UsageLogParser {
                 result.malformedLines += 1
                 return
             }
-            if agent == .codex { codex(json) } else if agent == .claudeCode { claude(json) }
+            if agent == .codex { codex(json) }
+            else if agent == .claudeCode { claude(json) }
+            else if agent == .grok { grok(json) }
+        }
+
+        /// Grok's update stream is JSON-RPC shaped, and a prompt's accounting
+        /// arrives as one `usage` summary on `params.update`. `modelUsage`
+        /// breaks that summary down per model, so a turn that switched models
+        /// is attributed to each rather than lumped under the last one.
+        ///
+        /// A prompt can be summarised more than once as it runs, and the counts
+        /// are cumulative for that prompt. Keying on the prompt rather than the
+        /// line means the repeats collapse onto one record, where the archive
+        /// keeps the largest reading of each bucket.
+        private mutating func grok(_ json: [String: Any]) {
+            guard let params = json["params"] as? [String: Any],
+                  let update = params["update"] as? [String: Any],
+                  let usage = update["usage"] as? [String: Any],
+                  let date = UsageLogParser.epochSeconds(json["timestamp"]) else { return }
+            let prompt = update["prompt_id"] as? String ?? update["promptId"] as? String
+                ?? "\(date.timeIntervalSince1970)"
+            let breakdown = usage["modelUsage"] as? [String: [String: Any]]
+            let entries = breakdown.map { $0.sorted { $0.key < $1.key }.map { ($0.key, $0.value) } }
+                ?? [("Unknown model", usage)]
+            for (model, raw) in entries {
+                // Cache reads and cache writes are both carved out of the
+                // reported input, and reasoning is already inside output.
+                let input = UsageLogParser.count(raw, "inputTokens")
+                let cached = min(input, UsageLogParser.count(raw, "cachedReadTokens"))
+                let write = min(input - cached, UsageLogParser.count(raw, "cacheCreationTokens"))
+                let output = UsageLogParser.count(raw, "outputTokens")
+                let tokens = TokenCounts(input: input - cached - write, cached: cached,
+                    cacheWrite: write, output: output,
+                    other: max(0, UsageLogParser.count(raw, "totalTokens") - input - output))
+                guard tokens.total > 0 else { continue }
+                result.records.append(TokenUsageRecord(
+                    id: UsageLogParser.key("grok:\(session):\(prompt):\(model)"), agent: .grok,
+                    session: session, timestamp: date, model: model, tokens: tokens))
+            }
         }
 
         private mutating func codex(_ json: [String: Any]) {

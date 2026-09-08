@@ -6,6 +6,7 @@ enum UsagePricing {
     /// - https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md
     /// - https://developers.openai.com/api/docs/pricing
     /// - https://ai.google.dev/gemini-api/docs/pricing
+    /// - https://docs.x.ai/docs/models
     ///
     /// Deliberately exact model IDs: no guessed family pricing. Standard
     /// short-context text rates; premiums, tools, storage, and subscription fees
@@ -13,6 +14,7 @@ enum UsagePricing {
     /// that bucket, which is correct for models that cannot cache at all.
     static let defaults: [String: ModelTokenPrice] = claude.merging(openAI) { first, _ in first }
         .merging(google) { first, _ in first }
+        .merging(xAI) { first, _ in first }
 
     /// Anthropic publishes every cache bucket per model: reads are a tenth of
     /// base input, five-minute writes 1.25x, and one-hour writes 2x. Claude Code
@@ -70,6 +72,18 @@ enum UsagePricing {
         "gemini-2.5-pro": .init(input: 1.25, cached: 0.125, output: 10),
         "gemini-2.5-flash": .init(input: 0.3, cached: 0.03, output: 2.5),
         "gemini-2.5-flash-lite": .init(input: 0.1, cached: 0.01, output: 0.4)
+    ]
+
+    /// xAI bills a whole request at the higher of two tiers once its prompt
+    /// reaches 200k tokens; these are the short-context rates, matching how the
+    /// other tables are read. `grok-4.6-build`, the model Grok Build actually
+    /// names in its logs, is deliberately absent: it is not a published ID, and
+    /// Grok's own cost figure for it does not reproduce from `grok-4.6` rates,
+    /// so pricing it as its near-namesake would be a guess dressed as a rate.
+    static let xAI: [String: ModelTokenPrice] = [
+        "grok-4.6": .init(input: 2, cached: 0.5, output: 6),
+        "grok-4.3": .init(input: 1.25, cached: 0.2, output: 2.5),
+        "grok-build-0.1": .init(input: 1, cached: 0.2, output: 2)
     ]
 
     static let defaultsKey = "tokenUsagePriceOverrides.v1"

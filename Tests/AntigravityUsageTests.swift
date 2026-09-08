@@ -185,10 +185,9 @@ final class AntigravityUsageTests: XCTestCase {
 
     func testAgentsWithoutLocalTokenCountsSayWhyRatherThanShowingZero() {
         XCTAssertFalse(UsageAgent.cursor.supportsHistory)
-        XCTAssertFalse(UsageAgent.grok.supportsHistory)
         XCTAssertNotNil(UsageAgent.cursor.unavailableReason)
-        XCTAssertNotNil(UsageAgent.grok.unavailableReason)
         XCTAssertNil(UsageAgent.antigravity.unavailableReason)
+        XCTAssertNil(UsageAgent.grok.unavailableReason)
         XCTAssertTrue(UsageAgent.cursor.roots(home: URL(fileURLWithPath: "/Users/example")).isEmpty)
     }
 }

@@ -19,7 +19,7 @@ struct UsageSourcesView: View {
                     }
                 }
                 Divider()
-                Text("Codex sessions and archives, Claude Code projects (including subagents), Gemini CLI chats, and Antigravity conversation stores are read locally. Imported token metadata is kept across log deletion and rotation. Prompts and responses are never saved by Usage.")
+                Text("Codex sessions and archives, Claude Code projects (including subagents), Gemini CLI chats, Antigravity conversation stores, and Grok update streams are read locally. Imported token metadata is kept across log deletion and rotation. Prompts and responses are never saved by Usage.")
                 Text("Lifetime covers all imported local history, across accounts on this Mac. It cannot recover logs deleted before the first import. Gemini CLI and Antigravity are separate sources, and Antigravity counts the app, its CLI, and its IDE integration together.")
             }
             .font(PanelFont.note)

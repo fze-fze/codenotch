@@ -55,7 +55,7 @@ final class UsagePricingTests: XCTestCase {
     /// sibling's: Codex's internal review model is billed to no public table.
     func testUnpublishedModelsStayUnpriced() {
         XCTAssertNil(UsagePricing.defaults["codex-auto-review"])
-        XCTAssertNil(UsagePricing.defaults["grok-4.6"])
+        XCTAssertNil(UsagePricing.defaults["grok-4.6-build"])
         XCTAssertNil(UsagePricing.defaults["composer-2.5"])
         XCTAssertNil(UsagePricing.defaults["Unknown model"])
         let summary = UsageSummary(records: [record(model: "codex-auto-review",
@@ -66,8 +66,9 @@ final class UsagePricingTests: XCTestCase {
         XCTAssertEqual(summary.tokens.total, 110, "tokens stay counted even when the rate is unknown")
     }
 
-    func testTheThreeSourceTablesDoNotCollide() {
-        let counts = UsagePricing.claude.count + UsagePricing.openAI.count + UsagePricing.google.count
+    func testTheSourceTablesDoNotCollide() {
+        let counts = UsagePricing.claude.count + UsagePricing.openAI.count
+            + UsagePricing.google.count + UsagePricing.xAI.count
         XCTAssertEqual(UsagePricing.defaults.count, counts, "a model id is priced by one source only")
         XCTAssertTrue(UsagePricing.defaults.values.allSatisfy(\.isValid))
     }

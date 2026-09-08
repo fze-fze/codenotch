@@ -15,18 +15,16 @@ enum UsageAgent: String, CaseIterable, Codable, Identifiable, Sendable {
         case .grok: return "Grok"
         }
     }
-    var supportsHistory: Bool { [.codex, .claudeCode, .gemini, .antigravity].contains(self) }
+    var supportsHistory: Bool { self != .cursor }
 
-    /// Why the two remaining agents stay unavailable, rather than being guessed
-    /// at from request counts. Both were checked against their own local state:
-    /// Cursor writes a `tokenCount` on every chat message and leaves it zeroed,
-    /// and Grok records no token counts at all — its usage telemetry is an
-    /// opt-in OpenTelemetry export to a collector the user configures, so there
-    /// is nothing on this Mac to read.
+    /// Why the remaining agent stays unavailable, rather than being guessed at
+    /// from request counts. Cursor was checked against its own local state: it
+    /// writes a `tokenCount` on every chat message and leaves both halves
+    /// zeroed. The non-zero token figures it does keep are context-window
+    /// limits and estimates, not what was billed.
     var unavailableReason: String? {
         switch self {
         case .cursor: return "Cursor stores chat history without token counts"
-        case .grok: return "Grok reports usage only to an external telemetry collector"
         default: return nil
         }
     }
@@ -42,6 +40,7 @@ enum UsageAgent: String, CaseIterable, Codable, Identifiable, Sendable {
         case .antigravity: paths = [".gemini/antigravity/conversations",
                                     ".gemini/antigravity-cli/conversations",
                                     ".gemini/antigravity-ide/conversations"]
+        case .grok: paths = [".grok/sessions"]
         default: paths = []
         }
         return paths.map { home.appendingPathComponent($0) }
@@ -57,6 +56,10 @@ enum UsageAgent: String, CaseIterable, Codable, Identifiable, Sendable {
                 && url.deletingLastPathComponent().lastPathComponent == "chats"
         case .antigravity:
             return url.pathExtension == "db"
+        case .grok:
+            // A Grok session folder holds several JSONL files; only the update
+            // stream carries accounting, and the rest are transcript and state.
+            return url.lastPathComponent == "updates.jsonl"
         default:
             return url.pathExtension == "jsonl"
         }
