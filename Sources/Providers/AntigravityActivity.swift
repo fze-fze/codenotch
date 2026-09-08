@@ -4,14 +4,20 @@ import Foundation
 /// transcripts.
 ///
 /// This exists because Google publishes no usage figure. `loadCodeAssist`
-/// returns tiers and nothing else, the conversation databases carry no token or
-/// quota columns, and whatever metadata comes back on `streamGenerateContent`
-/// is consumed by the stream and never written down. Counting locally is the
-/// only honest number available.
+/// returns tiers and nothing else, and no quota comes back on the wire.
+/// Counting locally is the only honest number available.
 ///
 /// It is a *count*, never a percentage. A fraction needs a limit and there is
 /// no published limit to divide by — inventing a denominator would put a
 /// confident ring on a guess.
+///
+/// This counts *requests*, from the transcripts, which is what the notch cell
+/// needs: a cheap, current "how busy has today been". It is not where tokens
+/// come from. Antigravity does record exact per-generation token counts, in
+/// the `ModelUsageStats` messages inside its conversation databases — an
+/// earlier version of this comment claimed those databases held nothing of the
+/// sort, which was wrong — and `AntigravityUsageReader` is what reads them for
+/// the Usage page.
 struct AntigravityActivity: Equatable {
     let requestsToday: Int
     let lastRequest: Date?

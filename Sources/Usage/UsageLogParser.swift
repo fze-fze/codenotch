@@ -22,6 +22,9 @@ enum UsageLogParser {
 
     static func read(url: URL, agent: UsageAgent) throws -> Result {
         if agent == .gemini { return try gemini(Data(contentsOf: url), fallbackSession: key(url.path)) }
+        // Antigravity is a SQLite database of protobuf, not a line-oriented
+        // log, so none of the streaming machinery below applies to it.
+        if agent == .antigravity { return AntigravityUsageReader.read(url: url) }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var parser = Lines(agent: agent, session: key(url.path))

@@ -15,6 +15,7 @@ final class UsageDashboardModel {
     private(set) var updatedAt: Date?
     private(set) var warnings: [String] = []
     private(set) var sourceFiles: [UsageAgent: Int] = [:]
+    private(set) var sources: [UsageSourceStatus] = []
     private(set) var prices = UsagePricing.defaults
     private(set) var pricingProblem: String?
     @ObservationIgnored private var records: [TokenUsageRecord] = []
@@ -71,6 +72,7 @@ final class UsageDashboardModel {
             try Task.checkCancellation()
             records = result.records
             sourceFiles = result.files
+            sources = result.sources
             warnings = result.warnings
             now = Date()
             updatedAt = now

@@ -6,6 +6,9 @@ actor UsageHistoryReader {
         var records: [TokenUsageRecord]
         var files: [UsageAgent: Int]
         var warnings: [String]
+        /// Per-agent collection report, in `UsageAgent.allCases` order. Present
+        /// even for agents that found nothing — that is the case it exists for.
+        var sources: [UsageSourceStatus] = []
     }
     private struct Signature: Codable, Equatable {
         let size: Int
@@ -45,9 +48,18 @@ actor UsageHistoryReader {
         }
         var warnings = archiveProblem.map { [$0] } ?? []
         var fileCounts: [UsageAgent: Int] = [:]
-        for agent in UsageAgent.allCases where agent.supportsHistory {
+        var statuses: [UsageAgent: UsageSourceStatus] = [:]
+        for agent in UsageAgent.allCases {
+            var status = UsageSourceStatus(agent: agent)
+            defer { statuses[agent] = status }
+            guard agent.supportsHistory else { continue }
             for root in agent.roots(home: home) {
-                guard manager.fileExists(atPath: root.path) else { continue }
+                let label = UsageSourceStatus.abbreviate(root, home: home)
+                guard manager.fileExists(atPath: root.path) else {
+                    status.missingFolders.append(label)
+                    continue
+                }
+                status.folders.append(label)
                 var enumerationFailed = false
                 guard let enumerator = manager.enumerator(at: root,
                     includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
@@ -56,19 +68,18 @@ actor UsageHistoryReader {
                         return true
                     }) else {
                     warnings.append("\(agent.title): history folder could not be read.")
+                    status.inaccessible = true
                     continue
                 }
                 var failures = 0
                 for case let url as URL in enumerator {
                     try Task.checkCancellation()
-                    let matches = agent == .gemini
-                        ? url.pathExtension == "json" && url.lastPathComponent.hasPrefix("session-") && url.deletingLastPathComponent().lastPathComponent == "chats"
-                        : url.pathExtension == "jsonl"
-                    guard matches else { continue }
-                    fileCounts[agent, default: 0] += 1
+                    guard agent.isHistoryFile(url) else { continue }
                     do {
                         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey])
                         guard values.isRegularFile == true else { continue }
+                        fileCounts[agent, default: 0] += 1
+                        status.files += 1
                         let signature = Signature(size: values.fileSize ?? 0, modified: values.contentModificationDate ?? .distantPast)
                         let fileKey = UsageLogParser.key(url.path)
                         guard archive.files[fileKey] != signature else { continue }
@@ -89,8 +100,14 @@ actor UsageHistoryReader {
                     } catch is CancellationError { throw CancellationError() }
                     catch { failures += 1 }
                 }
-                if enumerationFailed { warnings.append("\(agent.title): some history folders are inaccessible.") }
-                if failures > 0 { warnings.append("\(agent.title): \(failures) files were incomplete or unreadable; valid records were kept.") }
+                if enumerationFailed {
+                    warnings.append("\(agent.title): some history folders are inaccessible.")
+                    status.inaccessible = true
+                }
+                if failures > 0 {
+                    warnings.append("\(agent.title): \(failures) files were incomplete or unreadable; valid records were kept.")
+                    status.unreadable += failures
+                }
             }
         }
         try Task.checkCancellation()
@@ -103,6 +120,12 @@ actor UsageHistoryReader {
                 warnings.append("History could not be saved. These readings are available for this window only.")
             }
         }
-        return Snapshot(records: Array(archive.records.values), files: fileCounts, warnings: warnings)
+        // Counted from the ledger rather than from this pass, because an
+        // unchanged file is deliberately not reparsed — a per-scan count would
+        // read as zero on every refresh after the first.
+        let records = Array(archive.records.values)
+        for record in records { statuses[record.agent]?.records += 1 }
+        return Snapshot(records: records, files: fileCounts, warnings: warnings,
+                        sources: UsageAgent.allCases.compactMap { statuses[$0] })
     }
 }
