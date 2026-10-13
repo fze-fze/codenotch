@@ -24,17 +24,25 @@ actor GrokLocalProvider: UsageProvider {
     nonisolated let glyph = ProviderGlyph.grok
 
     private let creditsURL = URL(string: "https://cli-chat-proxy.grok.com/v1/billing?format=credits")!
+    private let settingsURL = URL(string: "https://cli-chat-proxy.grok.com/v1/settings")!
     private let session: URLSession
     private let authURL: URL
+    private let settingsCacheURL: URL
 
     /// The access token minted here, with the refresh token it came from. A
     /// fresh `grok login` writes a new refresh token, and a token renewed from
     /// the old one must not outlive that.
     private var renewed: (accessToken: String, expiresAt: Date, from: String)?
 
-    init(session: URLSession = .shared, authURL: URL = GrokCredentials.authURL) {
+    /// The plan's name and when it was read. A plan changes on a purchase, not
+    /// between ticks, so `/v1/settings` is asked again only after an hour.
+    private var plan: (name: String?, readAt: Date)?
+
+    init(session: URLSession = .shared, authURL: URL = GrokCredentials.authURL,
+         settingsCacheURL: URL = GrokCredentials.settingsCacheURL) {
         self.session = session
         self.authURL = authURL
+        self.settingsCacheURL = settingsCacheURL
     }
 
     nonisolated var signInRoute: SignInRoute {
@@ -58,16 +66,29 @@ actor GrokLocalProvider: UsageProvider {
         }
         Log.usage.debug("grok credits -> \(credits.prefix(400), privacy: .private)")
 
+        let windows = try GrokUsage.windows(creditsJSON: credits)
         return ProviderSnapshot(
             id: id,
             displayName: displayName,
             glyph: glyph,
             fidelity: .official,
             status: .ok,
-            windows: try GrokUsage.windows(creditsJSON: credits),
+            windows: windows,
             headlineID: "credits",
-            weeklyID: "credits"
+            weeklyID: "credits",
+            plan: await planName(token: token)
         )
+    }
+
+    /// The plan's name is a label, not the reading: a refused or failed
+    /// settings call falls back to the CLI's cached copy and never fails the
+    /// snapshot.
+    private func planName(token: String) async -> String? {
+        if let plan, Date().timeIntervalSince(plan.readAt) < 3600 { return plan.name }
+        let fetched = try? await body(from: settingsURL, token: token)
+        let name = fetched.flatMap(GrokUsage.plan(settingsJSON:)) ?? GrokCredentials.cachedPlan(from: settingsCacheURL)
+        plan = (name, Date())
+        return name
     }
 
     /// The file's own token while it lives — the CLI renewed it, so ours is

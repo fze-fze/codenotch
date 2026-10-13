@@ -28,10 +28,22 @@ struct GrokCredentials {
         guard let stored = (try? load(from: url)) else { return nil }
         return ProviderAccount(
             label: stored.email,
-            plan: nil,
+            plan: cachedPlan(),
             source: "Grok",
             manageURL: URL(string: "https://grok.com/?_s=usage")
         )
+    }
+
+    /// The CLI's own copy of `GET /v1/settings`, which names the plan.
+    static var settingsCacheURL: URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".grok/settings_cache.json")
+    }
+
+    static func cachedPlan(from url: URL = settingsCacheURL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        return GrokUsage.plan(settingsJSON: text)
     }
 
     static func load(from url: URL = authURL) throws -> GrokCredentials {

@@ -27,7 +27,8 @@ final class GrokLocalProviderTests: XCTestCase {
     func testALiveSessionIsPresentedAsIs() async throws {
         let authURL = try authFile(token: "live-token", expiresIn: 3600)
         GrokEndpoint.billing = [.init(status: 200, body: Self.credits)]
-        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL)
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
 
         let snapshot = try await provider.fetchSnapshot()
 
@@ -44,7 +45,8 @@ final class GrokLocalProviderTests: XCTestCase {
         let before = try Data(contentsOf: authURL)
         GrokEndpoint.token = [.init(status: 200, body: Self.minted("fresh-token"))]
         GrokEndpoint.billing = [.init(status: 200, body: Self.credits)]
-        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL)
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
 
         let snapshot = try await provider.fetchSnapshot()
 
@@ -64,7 +66,8 @@ final class GrokLocalProviderTests: XCTestCase {
         GrokEndpoint.token = [.init(status: 200, body: Self.minted("fresh-token"))]
         GrokEndpoint.billing = [.init(status: 200, body: Self.credits),
                                 .init(status: 200, body: Self.credits)]
-        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL)
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
 
         _ = try await provider.fetchSnapshot()
         _ = try await provider.fetchSnapshot()
@@ -80,7 +83,8 @@ final class GrokLocalProviderTests: XCTestCase {
         GrokEndpoint.token = [.init(status: 200, body: Self.minted("fresh-token"))]
         GrokEndpoint.billing = [.init(status: 200, body: Self.credits),
                                 .init(status: 200, body: Self.credits)]
-        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL)
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
 
         _ = try await provider.fetchSnapshot()
         _ = try authFile(token: "cli-renewed-token", expiresIn: 3600, at: authURL)
@@ -95,7 +99,8 @@ final class GrokLocalProviderTests: XCTestCase {
     func testARefusedRenewalIsCredentialExpired() async throws {
         let authURL = try authFile(token: "stale-token", expiresIn: -60)
         GrokEndpoint.token = [.init(status: 400, body: Data(#"{"error":"invalid_grant"}"#.utf8))]
-        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL)
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
 
         await assertCredentialExpired(from: provider)
         XCTAssertEqual(GrokEndpoint.bearers, [])
@@ -105,7 +110,8 @@ final class GrokLocalProviderTests: XCTestCase {
     /// by `grok login` — the answer it always gave.
     func testAFileWithoutARefreshTokenIsStillCredentialExpired() async throws {
         let authURL = try authFile(token: "stale-token", expiresIn: -60, refreshToken: nil)
-        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL)
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
 
         await assertCredentialExpired(from: provider)
         XCTAssertEqual(GrokEndpoint.tokenRequests.count, 0)
@@ -118,7 +124,8 @@ final class GrokLocalProviderTests: XCTestCase {
         GrokEndpoint.token = [.init(status: 200, body: Self.minted("first")),
                               .init(status: 200, body: Self.minted("second"))]
         GrokEndpoint.billing = [.init(status: 401), .init(status: 200, body: Self.credits)]
-        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL)
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
 
         do {
             _ = try await provider.fetchSnapshot()
@@ -129,7 +136,45 @@ final class GrokLocalProviderTests: XCTestCase {
         XCTAssertEqual(GrokEndpoint.bearers, ["first", "second"])
     }
 
+    /// The plan's name comes from `/v1/settings`, once an hour rather than
+    /// every tick.
+    func testThePlanIsReadFromSettingsOnce() async throws {
+        let authURL = try authFile(token: "live-token", expiresIn: 3600)
+        GrokEndpoint.billing = [.init(status: 200, body: Self.credits),
+                                .init(status: 200, body: Self.credits)]
+        GrokEndpoint.settings = [.init(status: 200,
+                                       body: Data(#"{"subscription_tier_display":"SuperGrok"}"#.utf8))]
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: noCache)
+
+        let first = try await provider.fetchSnapshot()
+        let second = try await provider.fetchSnapshot()
+
+        XCTAssertEqual(first.plan, "SuperGrok")
+        XCTAssertEqual(second.plan, "SuperGrok")
+        XCTAssertEqual(GrokEndpoint.settingsRequests, 1)
+    }
+
+    /// A failed settings call is not a failed reading: the CLI's cached copy
+    /// names the plan instead.
+    func testAFailedSettingsCallFallsBackToTheCLICache() async throws {
+        let authURL = try authFile(token: "live-token", expiresIn: 3600)
+        let cacheURL = directory.appendingPathComponent("settings_cache.json")
+        let payload = #"{"settings":{"subscription_tier_display":"SuperGrok"}}"#
+        try JSONSerialization.data(withJSONObject: ["payload": payload]).write(to: cacheURL)
+        GrokEndpoint.billing = [.init(status: 200, body: Self.credits)]
+        let provider = GrokLocalProvider(session: GrokEndpoint.session(), authURL: authURL,
+                                         settingsCacheURL: cacheURL)
+
+        let snapshot = try await provider.fetchSnapshot()
+
+        XCTAssertEqual(snapshot.status, .ok)
+        XCTAssertEqual(snapshot.plan, "SuperGrok")
+    }
+
     // MARK: - Helpers
+
+    private var noCache: URL { directory.appendingPathComponent("missing-settings-cache.json") }
 
     private func assertCredentialExpired(from provider: GrokLocalProvider,
                                          file: StaticString = #filePath, line: UInt = #line) async {
@@ -190,12 +235,14 @@ private final class GrokEndpoint: URLProtocol {
     private static let lock = NSLock()
     static var token: [Answer] = []
     static var billing: [Answer] = []
+    static var settings: [Answer] = []
     private(set) static var tokenRequests: [String] = []
     private(set) static var bearers: [String] = []
+    private(set) static var settingsRequests = 0
 
     static func reset() {
         lock.lock(); defer { lock.unlock() }
-        token = []; billing = []; tokenRequests = []; bearers = []
+        token = []; billing = []; settings = []; tokenRequests = []; bearers = []; settingsRequests = 0
     }
 
     static func session() -> URLSession {
@@ -213,6 +260,9 @@ private final class GrokEndpoint: URLProtocol {
         if request.url?.host == "auth.x.ai" {
             Self.tokenRequests.append(Self.formBody(of: request))
             answer = Self.token.isEmpty ? Answer(status: 500) : Self.token.removeFirst()
+        } else if request.url?.path == "/v1/settings" {
+            Self.settingsRequests += 1
+            answer = Self.settings.isEmpty ? Answer(status: 500) : Self.settings.removeFirst()
         } else {
             let header = request.value(forHTTPHeaderField: "Authorization") ?? ""
             Self.bearers.append(header.replacingOccurrences(of: "Bearer ", with: ""))

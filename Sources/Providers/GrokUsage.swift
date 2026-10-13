@@ -17,10 +17,11 @@ import Foundation
 ///
 /// The X Subscription is one bill. Grok, Grok Bot and Cursor draw on one
 /// included pool, and `creditUsagePercent` is how full that pool is.
-/// `productUsage` says which surface spent it — chat, build, the bot, Cursor —
-/// and is not another allowance, so it is not another window. The card stays
-/// the one Claude already draws: one limit, how much of it is spent, and when
-/// it resets.
+/// `productUsage` says which surface spent it — chat, voice, build, the bot,
+/// and Cursor, the one row the endpoint sends without a name — and is not
+/// another allowance. The
+/// ring stays the one Claude already draws: one limit, how much of it is
+/// spent, and when it resets. The product rows sit under it as a breakdown.
 ///
 /// Which limit it is comes from `currentPeriod.type`. The published plan
 /// refreshes weekly (`USAGE_PERIOD_TYPE_WEEKLY`). A period the endpoint marks
@@ -45,7 +46,7 @@ enum GrokUsage {
 
         if isSharedPool(credits, kind: kind),
            let window = sharedWindow(credits, kind: kind, resetsAt: creditsReset, duration: duration) {
-            return [window]
+            return [window] + breakdown(credits)
         }
 
         var windows: [LimitWindow] = []
@@ -130,6 +131,42 @@ enum GrokUsage {
             resetsAt: resetsAt,
             duration: duration
         )
+    }
+
+    /// Which surface spent the pool, as rows under it: text only, no bar and
+    /// no ring, because none of them is a limit of its own. The rows add up to
+    /// the pool. One row is the pool itself and says nothing more. The row
+    /// the endpoint sends without a name is Cursor's: it is the one surface on
+    /// the plan the list never names, and it moves with Cursor's own use.
+    static func breakdown(_ credits: [String: Any]) -> [LimitWindow] {
+        guard let products = credits["productUsage"] as? [[String: Any]], products.count > 1
+        else { return [] }
+        return products.enumerated().compactMap { index, product in
+            guard let fraction = percent(product["usagePercent"]) else { return nil }
+            let wireName = (product["product"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            return LimitWindow(
+                id: "product:" + (wireName ?? "\(index)"),
+                group: L10n.t("By product"),
+                label: wireName.map(humanize) ?? "Cursor",
+                detail: fraction.formatted(
+                    .percent.precision(.fractionLength(0...1)).locale(L10n.locale)
+                )
+            )
+        }
+    }
+
+    /// The plan's own name from the CLI's settings — what `grok` shows as
+    /// its tier. Read from `GET /v1/settings`, or the CLI's cached copy of it,
+    /// whose `payload` is that same response wrapped in a string.
+    static func plan(settingsJSON: String) -> String? {
+        guard var root = object(settingsJSON) else { return nil }
+        if let payload = root["payload"] as? String, let inner = object(payload) {
+            root = inner
+        }
+        let settings = root["settings"] as? [String: Any] ?? root
+        let name = (settings["subscription_tier_display"] as? String)
+            ?? (settings["subscription_tier"] as? String)
+        return name?.nonEmptyPlan
     }
 
     private static func productPercents(_ credits: [String: Any]) -> [Double] {

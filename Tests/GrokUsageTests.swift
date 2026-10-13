@@ -105,8 +105,9 @@ final class GrokUsageTests: XCTestCase {
     }
 
     /// The same percent covers Grok, Grok Bot and Cursor. Their rows are a
-    /// breakdown of that one pool, so the card stays a single limit window.
-    func testTheSharedPoolIsOneWindow() throws {
+    /// breakdown of that one pool, so the card stays a single limit window
+    /// and the products follow it as text-only rows.
+    func testTheSharedPoolIsOneLimit() throws {
         let shared = """
         {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY",\
         "start":"2026-10-01T00:00:00+00:00",\
@@ -117,7 +118,8 @@ final class GrokUsageTests: XCTestCase {
         {"product":"Cursor","usagePercent":3.0}]}}
         """
         let w = try GrokUsage.windows(creditsJSON: shared)
-        XCTAssertEqual(w.map(\.id), ["credits"])
+        XCTAssertEqual(w.map(\.id), ["credits", "product:Grok", "product:GrokBot", "product:Cursor"])
+        XCTAssertEqual(w.filter { $0.usedFraction != nil }.map(\.id), ["credits"])
         XCTAssertEqual(w[0].label, "Monthly limit")
         XCTAssertEqual(w[0].usedFraction ?? -1, 0.12, accuracy: 0.0001)
         XCTAssertEqual(w[0].duration, 31 * 86400)
@@ -177,5 +179,52 @@ final class GrokUsageTests: XCTestCase {
         XCTAssertFalse(GrokCredentials.isTrusted(key: "https://auth.x.aix::cli", entry: [:]))
         XCTAssertTrue(GrokCredentials.isTrusted(key: "https://auth.x.ai::cli", entry: [:]))
         XCTAssertTrue(GrokCredentials.isTrusted(key: "https://auth.x.ai", entry: [:]))
+    }
+
+    /// Recorded from a live SuperGrok account on the bundled plan. The first
+    /// row has no product name; it is Cursor's.
+    func testTheLiveBreakdownFollowsThePool() throws {
+        let previous = L10n.testLocale
+        L10n.testLocale = Locale(identifier: "en_US")
+        defer { L10n.testLocale = previous }
+
+        let live = """
+        {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY",\
+        "start":"2026-10-13T04:35:13.277+00:00","end":"2026-10-20T04:35:13.277+00:00"},\
+        "creditUsagePercent":14.0,"productUsage":[{"usagePercent":6.0},\
+        {"product":"GrokVoice","usagePercent":4.0},{"product":"GrokBuild","usagePercent":2.0},\
+        {"product":"GrokBot","usagePercent":1.0},{"product":"GrokChat","usagePercent":1.0}],\
+        "isUnifiedBillingUser":true,"prepaidBalance":{"val":0},\
+        "topUpMethod":"TOP_UP_METHOD_SAVED_PAYMENT_METHOD",\
+        "billingPeriodStart":"2026-10-13T04:35:13.277+00:00",\
+        "billingPeriodEnd":"2026-10-20T04:35:13.277+00:00"}}
+        """
+        let w = try GrokUsage.windows(creditsJSON: live)
+        XCTAssertEqual(w[0].id, "credits")
+        XCTAssertEqual(w[0].label, "Weekly limit")
+        XCTAssertEqual(w[0].usedFraction ?? -1, 0.14, accuracy: 0.0001)
+
+        let rows = Array(w.dropFirst())
+        XCTAssertEqual(rows.map(\.label), ["Cursor", "Grok Voice", "Grok Build", "Grok Bot", "Grok Chat"])
+        XCTAssertEqual(rows.map(\.detail), ["6%", "4%", "2%", "1%", "1%"])
+        XCTAssertTrue(rows.allSatisfy { $0.group == "By product" && $0.usedFraction == nil })
+        XCTAssertEqual(rows.first?.id, "product:0")
+    }
+
+    func testThePlanComesFromTheSettingsResponse() {
+        XCTAssertEqual(
+            GrokUsage.plan(settingsJSON: #"{"subscription_tier":null,"subscription_tier_display":"SuperGrok"}"#),
+            "SuperGrok"
+        )
+        XCTAssertNil(GrokUsage.plan(settingsJSON: #"{"subscription_tier_display":"  "}"#))
+        XCTAssertNil(GrokUsage.plan(settingsJSON: "not json"))
+    }
+
+    /// The CLI's cache wraps the same response in a string under `payload`.
+    func testThePlanComesFromTheCLICache() throws {
+        let inner = #"{"settings":{"subscription_tier_display":"SuperGrok"}}"#
+        let cache = String(data: try JSONSerialization.data(withJSONObject: ["payload": inner]),
+                           encoding: .utf8)!
+        XCTAssertEqual(GrokUsage.plan(settingsJSON: cache), "SuperGrok")
     }
 }
