@@ -72,25 +72,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// What the item shows now, so a publication that changes nothing on it —
     /// a local runtime is re-read every second — redraws nothing.
     private var summary: StatusItemSummary?
-    /// Normalized activity from the same provider monitors that feed the
-    /// notch. Kept separate from usage snapshots: a usage refresh is not work,
-    /// and activity never asks a provider to refresh its limits.
-    private(set) var activeProviderIDs: Set<String> = []
-    /// Pulses the marks of the entries that are working without drawing a
-    /// second, independently tinted copy of each mark over AppKit's image.
-    private let pulse = StatusItemPulse()
-    private var observers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
-    private weak var observedStatusWindow: NSWindow?
-    private var statusWindowObserver: NSObjectProtocol?
-    /// Read again when AppKit reports a display-accessibility change. Internal
-    /// so the no-animation treatment can be verified without changing the
-    /// development Mac's setting.
-    var reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-        didSet {
-            guard reducesMotion != oldValue else { return }
-            redrawArtwork()
-        }
-    }
     /// Wakes the item when its first countdown next changes, since the minutes
     /// run down between readings. One-shot and re-armed on every update: a
     /// minute's precision is all the bar shows.
@@ -109,37 +90,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = Self.icon()
         item.button?.toolTip = L10n.t("Codenotch")
-        // The pulse is a mask on the button's layer, and has to follow the
-        // button's width as the item is laid out around a new image.
-        item.button?.wantsLayer = true
-        item.button?.postsFrameChangedNotifications = true
 
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
 
         self.item = item
-        guard let button = item.button else { return }
-        observe(NSView.frameDidChangeNotification, on: .default, object: button) { controller in
-            controller.pulse.relayout()
-            controller.observeStatusWindow(of: button)
-        }
-        // AppKit drops layer animations while a window is off screen; the
-        // item's comes back when the bar does, and so should its pulse. The
-        // button can be made before AppKit attaches its private window, so do
-        // not register a nil-object observer (which would watch every window).
-        observeStatusWindow(of: button)
-        DispatchQueue.main.async { [weak self, weak button] in
-            guard let self, let button else { return }
-            self.observeStatusWindow(of: button)
-        }
-        observe(NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
-                on: NSWorkspace.shared.notificationCenter, object: nil) { controller in
-            controller.reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        }
-        // The controller can stay alive while its status item is hidden and
-        // therefore not observing workspace notifications. Re-read on show.
-        reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         updateButton()
     }
 
@@ -147,52 +103,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let item else { return }
         countdownTimer?.invalidate()
         countdownTimer = nil
-        pulse.clear()
-        stopObservingStatusWindow()
-        for (center, token) in observers { center.removeObserver(token) }
-        observers = []
         summary = nil
         NSStatusBar.system.removeStatusItem(item)
         self.item = nil
-    }
-
-    private func observe(_ name: Notification.Name, on center: NotificationCenter, object: AnyObject?,
-                         _ handle: @escaping (StatusItemController) -> Void) {
-        let token = center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                handle(self)
-            }
-        }
-        observers.append((center, token))
-    }
-
-    /// A status bar button lives in an AppKit-owned window which may not exist
-    /// until the next layout pass. Observe precisely that window once it does,
-    /// replacing the token if AppKit moves the item to another screen/window.
-    private func observeStatusWindow(of button: NSStatusBarButton) {
-        guard item?.button === button, let window = button.window else { return }
-        guard observedStatusWindow !== window else { return }
-        stopObservingStatusWindow()
-        observedStatusWindow = window
-        statusWindowObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didChangeOcclusionStateNotification,
-            object: window,
-            queue: .main
-        ) { [weak self, weak window] _ in
-            MainActor.assumeIsolated {
-                guard let self, let window, self.observedStatusWindow === window else { return }
-                self.pulse.ensureRunning()
-            }
-        }
-    }
-
-    private func stopObservingStatusWindow() {
-        if let statusWindowObserver {
-            NotificationCenter.default.removeObserver(statusWindowObserver)
-        }
-        statusWindowObserver = nil
-        observedStatusWindow = nil
     }
 
     // MARK: - Summary
@@ -214,7 +127,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         summary = next
 
         if next.entries.isEmpty {
-            pulse.clear()
             item.length = NSStatusItem.squareLength
             button.image = Self.icon()
             button.toolTip = L10n.t("Codenotch")
@@ -231,33 +143,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         button.setAccessibilityLabel(details)
     }
 
-    /// Called by the activity coordinator with provider-specific normalized
-    /// sessions. Waiting, success and an open-but-idle process are deliberately
-    /// static; only actual work (`busy`) pulses.
-    func setActivity(providerID: String, sessions: [AgentSession]) {
-        let isActive = sessions.contains { $0.state == .busy }
-        let changed: Bool
-        if isActive {
-            changed = activeProviderIDs.insert(providerID).inserted
-        } else {
-            changed = activeProviderIDs.remove(providerID) != nil
-        }
-        guard changed else { return }
-        redrawArtwork()
-    }
-
-    private var visibleActiveProviderIDs: Set<String> {
-        guard let summary else { return [] }
-        return activeProviderIDs.intersection(summary.entries.map(\.id))
-    }
-
     private func redrawArtwork() {
         guard let item, let button = item.button, let summary, !summary.entries.isEmpty else { return }
-        let working = visibleActiveProviderIDs
-        let artwork = StatusItemArtwork(
-            summary: summary,
-            activityBadgeProviderIDs: reducesMotion ? working : []
-        )
+        let artwork = StatusItemArtwork(summary: summary)
         button.image = artwork.image()
         // The item is its artwork and nothing besides. Left to size itself an
         // NSStatusBarButton pads an image by 7pt a side — what a lone icon
@@ -265,17 +153,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // against the next item's own padding, so a reading ended a clear 14pt
         // before anything else began. macOS still keeps the items apart.
         item.length = artwork.size.width
-        let glyphs = Dictionary(uniqueKeysWithValues: summary.entries.compactMap { entry in
-            artwork.glyphFrame(for: entry.id).map { (entry.id, $0) }
-        })
-        if reducesMotion {
-            // Accessibility changes are synchronous: no fading settle after
-            // Reduce Motion is enabled. The artwork above keeps activity
-            // visible as a still badge instead.
-            pulse.clear()
-        } else {
-            pulse.update(view: button, imageSize: artwork.size, glyphs: glyphs, working: working)
-        }
     }
 
     private func scheduleCountdown(at change: Date?) {
@@ -359,9 +236,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             ).target = self
         }
         menu.addItem(
-            withTitle: L10n.t("Activity…"), action: #selector(openActivity), keyEquivalent: ""
-        ).target = self
-        menu.addItem(
             withTitle: L10n.t("Settings…"), action: #selector(openSettings), keyEquivalent: ","
         ).target = self
         menu.addItem(.separator())
@@ -396,7 +270,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openSettings() { onOpenSettings() }
-    @objc private func openActivity() { Costs.showActivity() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func refreshProvider(_ sender: NSMenuItem) {

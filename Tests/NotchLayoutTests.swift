@@ -50,41 +50,6 @@ final class NotchLayoutTests: XCTestCase {
         XCTAssertEqual(named - bare, NotchLayout.cardBodyLineHeight, accuracy: 0.001)
     }
 
-    func testCardGrowsWithTheSessionList() {
-        let bare = NotchLayout.cardHeight(windowCount: 2)
-        let one = NotchLayout.cardHeight(windowCount: 2, sessionCount: 1)
-        let two = NotchLayout.cardHeight(windowCount: 2, sessionCount: 2)
-        XCTAssertGreaterThan(one, bare)
-        XCTAssertEqual(
-            two - one,
-            2 * NotchLayout.cardBodyLineHeight + NotchLayout.sessionRowGap + NotchLayout.blockSpacing,
-            accuracy: 0.001
-        )
-    }
-
-    /// The activity indicator lives in the gap between the glyph and the inside
-    /// edge of the track, and must not touch either.
-    func testActivityRingClearsTheGlyphAndTheTrack() {
-        let outerEdge = NotchLayout.activityDiameter / 2 + NotchLayout.activityStroke / 2
-        let innerEdge = NotchLayout.activityDiameter / 2 - NotchLayout.activityStroke / 2
-        let trackInnerEdge = NotchLayout.ringDiameter / 2 - NotchLayout.trackStroke
-        XCTAssertLessThan(outerEdge, trackInnerEdge)
-        XCTAssertGreaterThan(innerEdge, NotchLayout.glyphSize / 2)
-    }
-
-    /// The weekly ring is placed against what is already inside the circle
-    /// rather than quoted from the design frame, which draws one ring — so the
-    /// clearances are what the test states, not the numbers.
-    func testTheInsideWeeklyRingClearsTheGlyphAndTheWorkingIndicator() {
-        let outer = NotchLayout.weeklyInsideRadius + NotchLayout.weeklyRingStroke / 2
-        let inner = NotchLayout.weeklyInsideRadius - NotchLayout.weeklyRingStroke / 2
-        XCTAssertGreaterThan(inner, NotchLayout.glyphSize / 2,
-                             "the weekly ring is drawn over the glyph")
-        XCTAssertLessThan(outer,
-                          NotchLayout.activityDiameter / 2 - NotchLayout.activityStroke / 2,
-                          "the weekly ring collides with the working indicator")
-    }
-
     /// Outside, the two things it must not touch are the track it sits beyond
     /// and the bezel the notch keeps clear of.
     func testTheOutsideWeeklyRingClearsTheTrackAndTheBezel() {
@@ -294,12 +259,9 @@ final class TooltipResizeTests: XCTestCase {
         XCTAssertGreaterThan(two, one)
     }
 
-    /// Claude has two windows plus a session list; Codex has one and none. That
-    /// difference is the exact case where unclipped contents used to hang
-    /// outside a shorter background while the height was still animating.
     func testTheExtremesDifferEnoughToBeVisible() {
         let smallest = NotchLayout.cardHeight(windowCount: 1)
-        let largest = NotchLayout.cardHeight(windowCount: 2, sessionCount: 2)
+        let largest = NotchLayout.cardHeight(windowCount: NotchLayout.maxWindowCount)
         XCTAssertGreaterThan(largest - smallest, 40,
                              "the resize is big enough that overflow would show")
     }
@@ -1016,38 +978,6 @@ final class RenameMigrationTests: XCTestCase {
 /// clipped, and the clipping takes the *title* off the top. Six sessions did
 /// exactly that.
 final class TooltipOverflowTests: XCTestCase {
-    /// Whatever cap is in force, the card it produces has to fit the budget
-    /// that same cap sized the panel from.
-    func testACardNeverExceedsTheBudgetItsCapImplies() {
-        for cap in 0...NotchLayout.sessionCeiling {
-            let budget = NotchLayout.maxCardHeight(sessionCap: cap)
-            for sessions in 0...40 {
-                for windows in 0...NotchLayout.maxWindowCount {
-                    let height = NotchLayout.cardHeight(windowCount: windows,
-                                                        sessionCount: sessions,
-                                                        sessionCap: cap)
-                    XCTAssertLessThanOrEqual(
-                        height, budget,
-                        "cap \(cap): \(windows) windows and \(sessions) sessions overflow"
-                    )
-                }
-            }
-        }
-    }
-
-    /// Beyond the cap the height stops growing — that is what makes the bound
-    /// hold however many sessions are running.
-    func testHeightStopsGrowingPastTheCap() {
-        let cap = NotchLayout.defaultSessionCap
-        let atCap = NotchLayout.cardHeight(windowCount: 3, sessionCount: cap,
-                                           sessionCap: cap)
-        let overCap = NotchLayout.cardHeight(windowCount: 3, sessionCount: cap + 5,
-                                             sessionCap: cap)
-        let farOver = NotchLayout.cardHeight(windowCount: 3, sessionCount: 40,
-                                             sessionCap: cap)
-        XCTAssertEqual(overCap, farOver, "the height still grows with hidden sessions")
-        XCTAssertGreaterThan(overCap, atCap, "no room was left for the 'and N more' line")
-    }
 }
 
 /// Hiding sessions behind "and N more" is a cost, not a feature: the point of
@@ -1055,67 +985,6 @@ final class TooltipOverflowTests: XCTestCase {
 /// display rather than fixed — a laptop that cannot hold ten rows summarises,
 /// a desk display that can does not.
 final class SessionCapTests: XCTestCase {
-    func testWhatFitsAlwaysFitsTheBudgetItWasSolvedFor() {
-        for budget in stride(from: CGFloat(150), through: 1200, by: 37) {
-            let n = NotchLayout.sessionsFitting(cardBudget: budget,
-                                                windowCount: NotchLayout.maxWindowCount)
-            guard n > 0 else { continue }
-            XCTAssertLessThanOrEqual(
-                NotchLayout.maxCardHeight(sessionCap: n), budget,
-                "\(n) rows were admitted into \(budget)pt but do not fit"
-            )
-        }
-    }
-
-    /// The row after the last admitted one has to be one that genuinely does
-    /// not fit, or the search stopped early and hid a session for nothing.
-    func testNothingIsHiddenThatWouldHaveFitted() {
-        for budget in stride(from: CGFloat(150), through: 1200, by: 37) {
-            let n = NotchLayout.sessionsFitting(cardBudget: budget,
-                                                windowCount: NotchLayout.maxWindowCount)
-            guard n < NotchLayout.sessionCeiling else { continue }
-            XCTAssertGreaterThan(
-                NotchLayout.maxCardHeight(sessionCap: n + 1), budget,
-                "\(n + 1) rows would have fitted in \(budget)pt and were hidden anyway"
-            )
-        }
-    }
-
-    func testMoreRoomNeverListsFewer() {
-        var last = 0
-        for budget in stride(from: CGFloat(100), through: 1400, by: 11) {
-            let n = NotchLayout.sessionsFitting(cardBudget: budget,
-                                                windowCount: NotchLayout.maxWindowCount)
-            XCTAssertGreaterThanOrEqual(n, last, "a bigger screen listed fewer sessions")
-            last = n
-        }
-    }
-
-    /// Past a dozen the list has stopped being glanceable, and no amount of
-    /// screen should turn the tooltip into a scrolling log.
-    func testTheListStaysGlanceableOnAnyDisplay() {
-        XCTAssertEqual(NotchLayout.sessionsFitting(cardBudget: 100_000,
-                                                   windowCount: 0),
-                       NotchLayout.sessionCeiling)
-    }
-
-    /// The reported case: six sessions, on the display it was reported from.
-    /// Under the shipped cap of four, two of them were hidden on a screen with
-    /// room to spare.
-    @MainActor func testTheReportedCaseIsListedInFull() {
-        let model = NotchViewModel()
-        model.edge = .right
-        model.screenSize = CGSize(width: 1800, height: 1169)
-        XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4), 6)
-    }
-
-    @MainActor func testTheSmallestLaptopIsNoWorseOffThanTheFixedCap() {
-        let model = NotchViewModel()
-        model.edge = .right
-        model.screenSize = CGSize(width: 1470, height: 956)   // 13-inch Air
-        XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4), 1)
-    }
-
     /// And the panel it implies still has to land on the screen.
     ///
     /// From 900pt up, which is the shortest display any Mac ships with. Below
@@ -1149,13 +1018,6 @@ final class SessionCapTests: XCTestCase {
         }
     }
 
-    /// Before the controller has said which screen it is on, the figure that
-    /// shipped is what holds — never a panel sized for a display we have not
-    /// been told about.
-    @MainActor func testAnUnknownScreenKeepsTheShippedCap() {
-        let model = NotchViewModel()
-        XCTAssertEqual(model.sessionCap(cellCount: 4), NotchLayout.defaultSessionCap)
-    }
 }
 
 /// A tooltip is centred on the cell it belongs to, so the first and last
@@ -1251,20 +1113,12 @@ final class StatusMessageHeightTests: XCTestCase {
         }
     }
 
-    /// A status card still has to fit the panel that was sized without knowing
-    /// what it would say.
+
     func testAStatusCardStillFitsTheBudgetedPanel() {
         for (name, snapshot) in everyStatusCard {
-            let height = NotchLayout.cardHeight(
-                windowCount: 0,
-                sessionCount: NotchLayout.sessionCeiling,
-                sessionCap: NotchLayout.sessionCeiling,
-                statusMessage: snapshot.statusMessage
-            )
-            XCTAssertLessThanOrEqual(
-                height, NotchLayout.maxCardHeight(sessionCap: NotchLayout.sessionCeiling),
-                "\(name): a status card overflows the panel"
-            )
+            let height = NotchLayout.cardHeight(windowCount: 0, statusMessage: snapshot.statusMessage)
+            XCTAssertLessThanOrEqual(height, NotchLayout.maxCardHeight(),
+                                     "\(name): a status card overflows the panel")
         }
     }
 }
@@ -1305,27 +1159,6 @@ final class NotchSizeTests: XCTestCase {
 
         XCTAssertGreaterThan(drawnDepth(.large), drawnDepth(.medium))
         XCTAssertGreaterThan(drawnDepth(.medium), drawnDepth(.small))
-    }
-
-    /// The other half of that coupling, pinned so it is a decision rather than
-    /// a surprise: a larger notch is given a *shorter* card, because the screen
-    /// it has to fit on stayed the same size.
-    func testALargerNotchIsGivenAShorterCard() {
-        XCTAssertLessThan(model(scale: 1.25).maxCardHeight(cellCount: 3),
-                          model(scale: 0.8).maxCardHeight(cellCount: 3))
-    }
-
-    /// The trap this feature sets for itself. The tooltip is budgeted against
-    /// the screen, and the screen does not grow when the notch does — so a card
-    /// sized against the raw height would be drawn a quarter taller than it was
-    /// budgeted for, and run off the bottom of a small display.
-    func testALargerNotchGetsASmallerTooltipBudget() {
-        let large = model(scale: 1.25).sessionCap(cellCount: 3)
-        let medium = model(scale: 1).sessionCap(cellCount: 3)
-        let small = model(scale: 0.8).sessionCap(cellCount: 3)
-
-        XCTAssertLessThanOrEqual(large, medium)
-        XCTAssertLessThanOrEqual(medium, small)
     }
 
     /// And the card that budget produces still fits the screen it was budgeted

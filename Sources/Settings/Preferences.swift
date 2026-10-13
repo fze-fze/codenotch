@@ -324,45 +324,6 @@ final class Preferences: ObservableObject {
         MenuBarLimits(isOn: showsLimitsInMenuBar, chosen: menuBarProviders)
     }
 
-    /// Open the notch for a few seconds when an agent stops working.
-    ///
-    /// On by default: the app already knows the moment a session ends, and a
-    /// user who installed a thing that watches sessions is unlikely to want
-    /// that particular fact kept from them. It is a peek, not a notification —
-    /// nothing to dismiss, and it takes no focus.
-    @Published var announceSessionEnd: Bool {
-        didSet { defaults.set(announceSessionEnd, forKey: Keys.announceSessionEnd) }
-    }
-
-    /// How long that peek lasts.
-    @Published var peekDuration: PeekDuration {
-        didSet { defaults.set(peekDuration.rawValue, forKey: Keys.peekDuration) }
-    }
-
-    /// Sound the system alert alongside the peek.
-    ///
-    /// Separate from the peek because they fail differently: the peek is no use
-    /// on another Space or behind a full-screen window, and the sound is no use
-    /// in a meeting. Kept switchable on its own so neither one forces the
-    /// other.
-    @Published var sessionEndSound: Bool {
-        didSet { defaults.set(sessionEndSound, forKey: Keys.sessionEndSound) }
-    }
-
-    /// Which sound a finished turn makes.
-    @Published var sessionEndSoundName: String {
-        didSet { defaults.set(sessionEndSoundName, forKey: Keys.sessionEndSoundName) }
-    }
-
-    /// And which one a session blocked on you makes.
-    ///
-    /// A separate choice because the two say different things — one is "that's
-    /// done", the other is "you are the hold-up" — and a single sound for both
-    /// makes the second one easy to ignore.
-    @Published var sessionBlockedSoundName: String {
-        didSet { defaults.set(sessionBlockedSoundName, forKey: Keys.sessionBlockedSoundName) }
-    }
-
     /// Show a notification modal from the notch when a provider's limit resets.
     @Published var announceUsageReset: Bool {
         didSet { defaults.set(announceUsageReset, forKey: Keys.announceUsageReset) }
@@ -461,11 +422,6 @@ final class Preferences: ObservableObject {
         static let colorTransitionStyle = "colorTransitionStyle"
         static let lastSeenVersion = "lastSeenVersion"
         static let order = "providerOrder"
-        static let announceSessionEnd = "announceSessionEnd"
-        static let sessionEndSound = "sessionEndSound"
-        static let peekDuration = "peekDuration"
-        static let sessionEndSoundName = "sessionEndSoundName"
-        static let sessionBlockedSoundName = "sessionBlockedSoundName"
         static let announceUsageReset = "announceUsageReset"
         static let usageResetSound = "usageResetSound"
         static let usageResetSoundName = "usageResetSoundName"
@@ -675,16 +631,6 @@ final class Preferences: ObservableObject {
         // Absent means never chosen, so the rings keep the order the app ships
         // with until someone drags one.
         self.providerOrder = defaults.stringArray(forKey: Keys.order) ?? []
-        // Both default to on, so `bool(forKey:)` — which answers false for a
-        // key that was never written — cannot stand in for the default.
-        self.announceSessionEnd = defaults.object(forKey: Keys.announceSessionEnd) as? Bool ?? true
-        self.sessionEndSound = defaults.object(forKey: Keys.sessionEndSound) as? Bool ?? true
-        self.peekDuration = defaults.string(forKey: Keys.peekDuration)
-            .flatMap(PeekDuration.init(rawValue:)) ?? .standard
-        self.sessionEndSoundName = defaults.string(forKey: Keys.sessionEndSoundName)
-            ?? SessionChime.defaultFinished
-        self.sessionBlockedSoundName = defaults.string(forKey: Keys.sessionBlockedSoundName)
-            ?? SessionChime.defaultBlocked
         self.announceUsageReset = defaults.object(forKey: Keys.announceUsageReset) as? Bool ?? true
         self.usageResetSound = defaults.object(forKey: Keys.usageResetSound) as? Bool ?? true
         self.usageResetSoundName = defaults.string(forKey: Keys.usageResetSoundName)

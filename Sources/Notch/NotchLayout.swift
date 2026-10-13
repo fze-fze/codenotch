@@ -72,11 +72,6 @@ enum NotchLayout {
     static let glyphSize     = Design.px(46)
     static let ringLabelGap  = Design.px(26.9)
 
-    // The activity indicator. Not in the design frame — sized to sit in the gap
-    // between the glyph (46px across) and the inside edge of the track (86px),
-    // so it never crowds either.
-    static let activityDiameter = Design.px(72)
-    static let activityStroke   = Design.px(5.5)
 
     // The weekly ring. Not in the design frame — the frame draws one ring per
     // provider — so these are placed against what is already there rather than
@@ -190,25 +185,16 @@ enum NotchLayout {
     static let moneyBarHeight = Design.px(12)
     static let moneyBarToStats = Design.px(14)
     static let moneyStatGap = Design.px(4)
-    static let sessionRowGap = Design.px(10)   // the two lines of one session
-    /// The spinner beside a session's status. Sized against the body text's cap
-    /// (18px) rather than picked by eye, so it reads as part of the word rather
-    /// than a bullet pinned near it.
+    /// A status mark beside a line of body text. Sized against the body text's
+    /// cap (18px) rather than picked by eye, so it reads as part of the word
+    /// rather than a bullet pinned near it.
     static let statusDot       = Design.px(17)
-    static let statusDotStroke = Design.px(3.4)
     static let statusDotGap    = Design.px(11)
-    static let hairline      = Design.px(2.5)  // rule above the session list
+    static let hairline      = Design.px(2.5)  // rule above a card section
 
     // Codex account activity
     static let codexUsageTop   = Design.px(20)
-    static let codexMetricTop  = Design.px(14)
-    static let codexMetricRowGap = Design.px(8)
-    static let codexMetricRowHeight = Design.px(40)
-    static let codexMetricHeight = 5 * codexMetricRowHeight + 4 * codexMetricRowGap
-    static let codexMetricBottom = Design.px(14)
     static let codexUsageRowGap = Design.px(12)
-    static let codexChartTop   = Design.px(15)
-    static let codexChartHeight = Design.px(115)
     /// Title, count, and expiry. The third line is reserved so a missing
     /// expiry cannot shrink the hover region under the card.
     static var codexResetCreditsHeight: CGFloat {
@@ -351,20 +337,15 @@ enum NotchLayout {
         bodyLength(cellCount: cellCount, edge: edge, spacing: spacing) + 2 * flare
     }
 
-    /// The tooltip's height for a given number of limit windows and live
-    /// sessions. Worked out here rather than left to SwiftUI so the hover region
+    /// The tooltip's height for a given number of limit windows. Worked out here rather than left to SwiftUI so the hover region
     /// can be computed before the card is ever laid out.
     static func cardHeight(windowCount: Int, groupCount: Int = 0, leadsWithGroup: Bool = true,
                            moneyWindowCount: Int = 0,
-                           sessionCount: Int = 0,
-                           sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
                            blockMessage: String? = nil,
-                           hasTokenUsage: Bool = false,
                            hasPlan: Bool = false,
                            hasResetCredits: Bool = false,
-                           compactRowCount: Int = 0,
-                           costRows: Int = 0) -> CGFloat {
+                           compactRowCount: Int = 0) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
             + (hasPlan ? cardBodyLineHeight : 0)
         var height = 2 * cardPadding + header
@@ -413,32 +394,6 @@ enum NotchLayout {
             height += codexUsageTop + hairline + codexResetCreditsHeight
         }
 
-        // "What used it": a line of range tabs, then one line per project.
-        if costRows > 0 {
-            height += blockSpacing + cardBodyLineHeight
-                + CGFloat(costRows) * (cardBodyLineHeight + sessionRowGap)
-        }
-
-        if hasTokenUsage {
-            height += codexUsageTop + hairline + blockSpacing
-                + codexMetricTop + codexMetricHeight + codexMetricBottom
-                + hairline
-                + 2 * cardBodyLineHeight
-                + codexUsageRowGap
-                + codexChartTop + codexChartHeight
-        }
-
-        if sessionCount > 0 {
-            let shown = min(sessionCount, max(0, sessionCap))
-            let row = 2 * cardBodyLineHeight + sessionRowGap
-            height += blockSpacing + hairline + blockSpacing
-                + CGFloat(shown) * row
-                + CGFloat(max(0, shown - 1)) * blockSpacing
-            // The "and N more" line, which only exists when something is hidden.
-            if sessionCount > shown {
-                height += blockSpacing + cardBodyLineHeight
-            }
-        }
         return height
     }
 
@@ -479,67 +434,19 @@ enum NotchLayout {
     /// whole stack and has to hold whichever card is worst.
     static let maxWindowCount = 4
 
-    /// How many sessions a tooltip lists before summarising the rest.
-    ///
-    /// Not a fixed number, because the honest answer depends on the display.
-    /// The card's height is budgeted rather than measured, and the budget is
-    /// what decides how far the panel reaches — so a card taller than the panel
-    /// is not scrolled or grown, it is *clipped*, at the top, where the title
-    /// is. But a cap low enough to be safe on a laptop hides sessions on a
-    /// desk display that had room for all of them, and a hidden session is the
-    /// one thing a glanceable readout must not do.
-    ///
-    /// So the cap is solved for the screen: as many rows as fit, and the
-    /// summary line only when the display genuinely cannot hold the rest.
-    ///
-    /// Solved by walking up rather than by inverting `cardHeight` — the height
-    /// is a sum of a dozen named parts, and an inverted copy of it would have
-    /// to be kept in step by hand. The range is short enough that the search
-    /// costs nothing.
-    static func sessionsFitting(cardBudget: CGFloat, windowCount: Int,
-                                groupCount: Int = 2,
-                                hasTokenUsage: Bool = false,
-                                hasPlan: Bool = false,
-                                hasResetCredits: Bool = false) -> Int {
-        var fits = 0
-        for n in 1...sessionCeiling {
-            // Costed as though something were still hidden, so that admitting
-            // the nth row can never be what pushes the summary line off the
-            // bottom of the card.
-            let height = cardHeight(windowCount: windowCount, groupCount: groupCount,
-                                    sessionCount: n + 1, sessionCap: n,
-                                    hasTokenUsage: hasTokenUsage, hasPlan: hasPlan,
-                                    hasResetCredits: hasResetCredits)
-            guard height <= cardBudget else { break }
-            fits = n
-        }
-        return fits
-    }
-
-    /// Past this many rows the list has stopped being glanceable, and counting
-    /// the rest is the kinder answer however much room the screen has.
-    static let sessionCeiling = 12
-
-    /// What to assume before the panel knows which screen it is on. The figure
-    /// that shipped, so nothing about the default placement moves.
-    static let defaultSessionCap = 4
-
     /// The tallest card the panel must be able to show without clipping it.
     ///
     /// Being generous costs nothing, since the panel is transparent and passes
     /// clicks through everywhere the chrome is not — but it cannot be so
     /// generous that the panel runs off the screen, which is what the cap is
     /// solved for.
-    static func maxCardHeight(sessionCap: Int, hasTokenUsage: Bool = false,
-                              hasPlan: Bool = false,
+    static func maxCardHeight(hasPlan: Bool = false,
                               hasResetCredits: Bool = false) -> CGFloat {
         cardHeight(windowCount: maxWindowCount, groupCount: 2,
-                   sessionCount: sessionCap + 1, sessionCap: sessionCap,
-                   hasTokenUsage: hasTokenUsage, hasPlan: hasPlan,
-                   hasResetCredits: hasResetCredits)
+                   hasPlan: hasPlan, hasResetCredits: hasResetCredits)
     }
 
-    static let defaultMaxCardHeight = maxCardHeight(sessionCap: defaultSessionCap)
+    static let defaultMaxCardHeight = maxCardHeight()
 
     /// How far the panel reaches inward from the bezel, past the notch itself,
     /// so the tooltip has somewhere to live. Beside the stack on a side edge,

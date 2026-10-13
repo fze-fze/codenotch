@@ -27,9 +27,6 @@ struct UsageArchive {
         /// Optional for the same reason: an archive written before the weekly
         /// ring existed has no second window to name, and must still open.
         let weeklyID: String?
-        /// Optional so archives written before Codex token activity existed
-        /// continue to open and show their last quota reading.
-        let tokenUsage: CodexTokenUsage?
         /// Whose reading this was. Optional for the same reason, and kept so a
         /// remembered one still says it — a reading restored from the archive
         /// is exactly when "which account is this?" is hardest to answer.
@@ -105,8 +102,7 @@ struct UsageArchive {
                 status: .stale(since: entry.fetchedAt),
                 windows: windows,
                 headlineID: entry.headlineID,
-                weeklyID: entry.weeklyID,
-                tokenUsage: entry.tokenUsage
+                weeklyID: entry.weeklyID
             )
             snapshot.plan = entry.plan
             result[entry.id] = (snapshot, entry.fetchedAt)
@@ -132,7 +128,6 @@ struct UsageArchive {
                 fetchedAt: $0.fetchedAt,
                 headlineID: $0.snapshot.headlineID,
                 weeklyID: $0.snapshot.weeklyID,
-                tokenUsage: $0.snapshot.tokenUsage,
                 plan: $0.snapshot.plan
             )
         }

@@ -8,8 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **A macOS app that pins a small black notch to a screen edge, showing how much
-of each coding assistant's usage limit you have burned — and whether it is
-still working, done, or waiting on you.**
+of each coding assistant's usage limit you have burned, and when it resets.**
 
 ![Collapsed notch with hover tooltip](docs/design/frame-124-hover-tooltip.png)
 
@@ -49,7 +48,7 @@ instead, see [Building](#building).
 ## Connect your phone
 
 The Codenotch phone app (iOS and Android) can show the same usage
-percentages, reset times and session states as the notch on your Mac.
+percentages and reset times as the notch on your Mac.
 It reads only what the notch already displays — never tokens, credentials
 or raw API responses.
 
@@ -89,14 +88,9 @@ launches. A provider you switch back on joins the end of that list rather than
 reclaiming an older position, so nothing you cannot currently see jumps ahead
 of something you placed deliberately.
 
-It also answers **"is it still working?"** — a thin arc spins inside a
-provider's ring while a session is busy, and becomes a pulsing amber ring when
-one is blocked waiting on you. Hover for every live session by name, where it
-is running, and what it wants.
-
 Two Claude Code logins are two rings. Anyone who keeps a work account apart with
 `CLAUDE_CONFIG_DIR=~/.claude-work claude` gets a **Claude (work)** ring beside the
-personal one, with its own limits, its own sessions and its own row in Settings.
+personal one, with its own limits and its own row in Settings.
 Any `~/.claude-<slug>` directory Claude Code has run against is found at launch;
 the default `~/.claude` always comes first, the rest in alphabetical order, so the
 rings never swap places.
@@ -113,7 +107,7 @@ CODEX_HOME="$HOME/.codex-work" codex -c 'cli_auth_credentials_store="file"' logi
 ```
 
 Choose the second account during sign-in, then restart Codenotch. Run that
-account's CLI sessions with `CODEX_HOME="$HOME/.codex-work" codex` as well.
+account's CLI with `CODEX_HOME="$HOME/.codex-work" codex` as well.
 Repeat with another name, such as `.codex-personal`, for more accounts.
 Settings shows each account's email and profile directory; each ring can be
 reordered or switched off independently. Switching one off forgets only its
@@ -125,38 +119,6 @@ or writes Codex credentials. If a login expires, use that profile's Codex CLI
 to renew it. Directories outside the `~/.codex-<slug>` convention are not
 discovered automatically, and adding a profile requires restarting Codenotch,
 just as it does for Claude.
-
-## When a session ends
-
-The notch opens itself for five seconds when an agent stops working, or stops
-to ask you something, and sounds the system alert. Clicking it while it is open
-brings that session's application to the front.
-
-The app, not the tab. A session publishes its pid and nothing else — no window,
-no tab, no tty — so the app is found by walking up the process tree from the
-agent to whatever launched it. Choosing the *tab* inside that app needs the
-terminal's own scripting interface, and there is no general one: Terminal.app
-and iTerm2 can match a tab by tty, Warp and Ghostty publish no scripting
-dictionary at all. So the app is raised for everybody and the tooltip names the
-session, which leaves the last hop one keystroke rather than working for two
-terminals and silently doing nothing in a third.
-
-Both halves switch off separately in Settings, because they fail differently:
-the peek is no use behind a full-screen window, and the sound is no use in a
-meeting. Each of the two events — finished, and waiting on you — picks its own
-sound there, with a preview button beside it.
-
-The sound is played as a file on the ordinary output rather than handed to
-`NSSound` as a system alert. A system alert goes through the interface
-sound-effects channel, which System Settings → Sound can switch off — and on a
-Mac where it is off, `NSSound.play()` reports success and nothing is heard.
-
-Only *leaving* busy counts. A question being answered is not a piece of work
-ending, and a session whose file disappears mid-turn — which is what quitting
-Claude Code looks like — is not announced at all, since there is no window left
-to jump to. Nothing is announced from the first reading either: every session
-already running at launch arrives with no history, and treating that as a
-transition would ring once per open window on every start.
 
 ## Alerts
 
@@ -290,9 +252,8 @@ profile, so one account's numbers can never land on another's ring. No token, no
 cookie, no credential and no request to Anthropic are involved. A snapshot older
 than 30 minutes is not shown as live — it drops through to the paths below, and
 the last good reading ages and dims as any other would. Two minutes, not thirty,
-while a session is running or while you are looking at the ring: that is when
-the figure is moving, and a cache is the one source that cannot tell you it
-has. Chromium's cache format
+while you are looking at the ring: that is when the figure is read, and a cache
+is the one source that cannot tell you it has moved. Chromium's cache format
 is private and may change; if it does, the source goes quiet and the existing
 ones take over. Bodies are `content-encoding: zstd` and macOS ships no decoder,
 so a decode-only build of Zstandard is vendored under
@@ -325,18 +286,14 @@ credential — so a valid grant does not mean a prompt on every poll.
 unhelpful `Retry-After: 0`. The back-off treats that as a floor-raiser only —
 60s, doubling per consecutive 429, capped at 15 minutes — and the deadline is
 persisted, so relaunching during a penalty waits instead of spending an
-attempt on it. Polling drops to every 5 minutes when nothing is running, and
-right-clicking the notch offers **Refresh now**.
+attempt on it. Polling runs every 5 minutes, and right-clicking the notch
+offers **Refresh now**.
 
-**How current the figures are.** Your usage cannot move while nothing is
-running, so the schedule spends its budget where the number actually changes:
-every 30 seconds while a session is working, every 5 minutes while none is, and
-at once when a limit window rolls over. Three things outside the schedule also
-ask, because each one is a moment the figure is either about to change or about
-to be read: a session *stopping* (one reading, so the total you just earned is
-on the bar within a second or two rather than up to five minutes later),
-opening the menu bar item's menu, and putting the pointer on a ring. The last
-two are spaced — hovering four rings in four seconds is one reading, not four.
+**How current the figures are.** The schedule reads every 5 minutes, and at
+once when a limit window rolls over. Two things outside the schedule also ask,
+because each is a moment the figure is about to be read: opening the menu bar
+item's menu, and putting the pointer on a ring. Both are spaced — hovering four
+rings in four seconds is one reading, not four.
 
 The reset countdown is drawn against a clock, not against the last reading, so
 it is right to the second whether or not anything has been fetched: the card

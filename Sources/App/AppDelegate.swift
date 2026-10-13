@@ -9,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var phoneLinkServerStatus: PhoneLinkServerStatus?
     var phoneLinkPairing: PhoneLinkPairing?
     var phoneLinkRegistry: PhoneLinkRegistry?
-    private var activityCoordinator: ActivityCoordinator?
     private var preferences: Preferences?
     private var settings: SettingsWindowController?
     private var whatsNew: WhatsNewWindowController?
@@ -23,14 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// is never run by hand. See `ClaudeTokenRefresher`.
     private var tokenRefresher: ClaudeTokenRefresher?
     private var cancellables = Set<AnyCancellable>()
-    /// Turns the monitors' running commentary into the one event worth
-    /// interrupting for: an agent that has just stopped working.
-    private var completions = SessionCompletionWatcher()
-    /// Which providers were working as of the last thing a monitor said, so the
-    /// moment one stops can be told apart from the many moments it is still
-    /// going. Held here rather than asked of `ActivityCoordinator`, which
-    /// reports the state after the change and cannot answer what it was before.
-    private var busyProviderIDs: Set<String> = []
 
     /// The unit bundle is hosted by this app, so `xcodebuild test` launches it
     /// for real. Without this guard every test run put a live request on the
@@ -147,7 +138,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // order for a frame and then visibly shuffles.
                 order: preferences.providerOrder
             )
-            Costs.attach(to: store)
 
             let updater = Updater()
             self.updater = updater
@@ -196,7 +186,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             snapshots: Self.drawn(store.snapshots,
                                                   weekly: preferences.weeklyHeadline,
                                                   paced: preferences.claudeDailyPaceRing),
-                            sessions: Array(fleet.sessions.values.flatMap { $0 }),
                             disconnected: store.disconnected,
                             order: preferences.providerOrder,
                             serverName: PhoneLinkNetwork.getComputerName(),
@@ -222,7 +211,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             snapshots: Self.drawn(store.snapshots,
                                                   weekly: preferences.weeklyHeadline,
                                                   paced: preferences.claudeDailyPaceRing),
-                            sessions: Array(fleet.sessions.values.flatMap { $0 }),
                             disconnected: store.disconnected,
                             order: preferences.providerOrder,
                             serverName: PhoneLinkNetwork.getComputerName(),
@@ -275,10 +263,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             // The gear toggles; everything else that opens settings opens it.
             fleet.onOpenSettings = { [weak settings] in settings?.toggle() }
-            // A session row answers where it runs by taking you there.
-            fleet.onFocusSession = { pid in
-                Task { _ = await SessionFocus.focus(pid: pid) }
-            }
             self.settings = settings
 
             // What changed, once per version — including on a fresh install,
@@ -410,7 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // just changed. Dragging the slider keeps re-arming this, so
                 // it simply stays open until the drag stops. `peek` still
                 // declines outright when the notch is set to Hide.
-                fleet.peek(for: 1.2, focusing: nil)
+                fleet.peek(for: 1.2)
             }
             .store(in: &cancellables)
 
@@ -586,81 +570,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.store = store
         }
 
-        // What each agent is doing right now, so the notch can say whether it is
-        // still working without you switching to it.
-        var monitors: [String: any AgentActivityMonitor] = [
-            "grok": GrokActivityMonitor(),
-        ]
-        for profile in antigravityProfiles {
-            monitors[profile.id] = AntigravityActivityMonitor(profile: profile)
-        }
-        var claudeMonitors: [ClaudeSessionMonitor] = []
-        var claudeMonitorsByProfile: [(ClaudeProfile, ClaudeSessionMonitor)] = []
-        for profile in claudeProfiles {
-            let monitor = ClaudeSessionMonitor(
-                directory: profile.sessionsDirectory,
-                projects: profile.projectsDirectory
-            )
-            claudeMonitors.append(monitor)
-            claudeMonitorsByProfile.append((profile, monitor))
-            monitors[profile.id] = monitor
-        }
-
-        // With one profile there is nothing to attribute: every session in the
-        // directory is that account's, by definition. With two or more there
-        // is, because the Claude desktop app files the sessions it hosts under
-        // the *default* profile's directory whichever account it is signed in
-        // to — so the second account's work spun the first account's ring, and
-        // switching account in the app did not move it. See
-        // `ClaudeSessionOwnership`.
-        if claudeProfiles.count > 1 {
-            let index = ClaudeDesktopSessionIndex()
-            let directories = claudeProfiles.map(\.sessionsDirectory)
-            var accounts: [String: String] = [:]
-            var transcripts: [String: ClaudeTranscriptReader] = [:]
-            for profile in claudeProfiles {
-                let path = profile.sessionsDirectory.path
-                if let account = profile.accountID() { accounts[path] = account }
-                transcripts[path] = ClaudeTranscriptReader(projects: profile.projectsDirectory)
-            }
-            let profileIDs = Dictionary(uniqueKeysWithValues: claudeProfiles.map {
-                ($0.sessionsDirectory.path, $0.id)
-            })
-            for (profile, monitor) in claudeMonitorsByProfile {
-                var ownership = ClaudeSessionOwnership(
-                    own: profile.sessionsDirectory,
-                    directories: directories,
-                    accounts: accounts,
-                    transcripts: transcripts,
-                    index: index
-                )
-                ownership.isShown = { [weak preferences] directory in
-                    guard let preferences, let id = profileIDs[directory.path] else { return true }
-                    return preferences.isConnected(id)
-                }
-                monitor.ownership = ownership
-            }
-            let named = accounts.count, total = claudeProfiles.count
-            Log.sessions.info("claude session ownership: \(named, privacy: .public) of \(total, privacy: .public) profiles name an account")
-        }
-        for profile in codexProfiles {
-            monitors[profile.id] = CodexActivityMonitor(profile: profile)
-        }
-
-        // The `/usage` probe is a Claude Code process too, and files a session
-        // for the seconds it runs. Every Claude monitor steps over it by pid
-        // and by its scratch directory, whether or not a token refresher runs
-        // below. Without this the probe showed as a `busy` session, vanished,
-        // and was announced as a turn that finished.
-        for monitor in claudeMonitors {
-            monitor.ignoredPIDs = { ClaudeUsageCLI.runningPIDs }
-            monitor.ignoredWorkingDirectories = [ClaudeUsageCLI.scratchLocation().path]
-        }
-
-        // Renewing the token runs the Claude command, which registers a session
-        // of its own for the second it lives. Every Claude monitor is told to
-        // step over that pid, so it never reaches the notch and never counts as
-        // work in progress.
+        // Renewing the token keeps the Claude ring reading on a Mac where the
+        // CLI is never run by hand.
         //
         // Only the default profile is renewed. The command writes whichever
         // directory `CLAUDE_CONFIG_DIR` names, so a second profile would need
@@ -672,13 +583,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 expiry: { await defaultProvider.tokenExpiry },
                 reload: { await defaultProvider.reloadTokenExpiry() }
             )
-            for monitor in claudeMonitors {
-                monitor.ignoredPIDs = { [weak refresher] in
-                    var pids = ClaudeUsageCLI.runningPIDs
-                    if let pid = refresher?.launchedPID { pids.insert(pid) }
-                    return pids
-                }
-            }
             // The one place the failure becomes visible. The store carries the
             // fact; nothing here retries, and the warning clears itself the
             // moment a reading comes back.
@@ -693,25 +597,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refresher.start()
             tokenRefresher = refresher
         }
-        let activity = ActivityCoordinator(monitors: monitors) { [weak self, weak fleet] id, sessions in
-            guard let fleet else { return }
-            fleet.setSessions(providerID: id, sessions: sessions)
-            self?.statusItem?.setActivity(providerID: id, sessions: sessions)
-            self?.announceCompletions(sessions: fleet.sessions)
-            self?.noteWorkState(providerID: id, sessions: sessions)
-        }
-        self.activityCoordinator = activity
-        activity.setEnabled(preferences.connectedProviders)
-        preferences.$connectedProviders
-            .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak activity] connected in
-                activity?.setEnabled(connected)
-            }
-            .store(in: &cancellables)
-
-
-        store?.isBusy = { [weak activity] in activity?.isBusy ?? false }
         // Read on every look rather than carried in by a sink, for the reason
         // `isBusy` is: a stored copy answers with whatever the preference was
         // when it was last delivered, and this one is a switch somebody flips to
@@ -782,58 +667,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fleet.show()
     }
 
-    /// Open the notch, and make a noise, when something has just finished.
-    ///
-    /// The watcher is fed on every publication whether or not anything is
-    /// switched on, because it is a difference engine: skipping a reading would
-    /// leave it comparing against a state two changes old, and the *next*
-    /// transition it reported would be one that never happened.
-    ///
-    /// Several sessions can land in the same reading — one turn ending often
-    /// unblocks another — and that gets one peek and one chime rather than a
-    /// chord. The newest is the one offered, since it is the one whose window
-    /// you were most recently in.
-    @MainActor
-    private func announceCompletions(sessions: [String: [AgentSession]]) {
-        let events = completions.absorb(sessions)
-        guard let event = events.first, let preferences, let fleet = notchFleet else { return }
-        Log.usage.info("session \(event.session.name, privacy: .public) \(String(describing: event.reason), privacy: .public)")
-
-        if preferences.sessionEndSound {
-            SessionChime.play(event.reason == .blocked
-                              ? preferences.sessionBlockedSoundName
-                              : preferences.sessionEndSoundName)
-        }
-        guard preferences.announceSessionEnd else { return }
-        if preferences.notificationChannel == .mac {
-            ChannelNotifications.sessionEnded(name: event.session.name, blocked: event.reason == .blocked)
-            return
-        }
-        fleet.peek(for: preferences.peekDuration.seconds,
-                   focusing: event.session.processID)
-    }
-
-    /// Takes one reading on the falling edge of a provider's work.
-    ///
-    /// The rising edge needs nothing: work that has just started has not spent
-    /// anything yet, and the busy schedule is already polling. The falling edge
-    /// is where the schedule drops to the idle interval and leaves the figure
-    /// somebody actually came to look at — what that run cost — alone for five
-    /// minutes. The store decides whether to spend a fetch on it; see
-    /// `UsageStore.refreshBecauseWorkFinished`.
-    @MainActor
-    private func noteWorkState(providerID: String, sessions: [AgentSession]) {
-        let isBusy = sessions.contains { $0.state == .busy }
-        if busyProviderIDs.contains(providerID), !isBusy {
-            store?.refreshBecauseWorkFinished(providerID: providerID)
-        }
-        if isBusy {
-            busyProviderIDs.insert(providerID)
-        } else {
-            busyProviderIDs.remove(providerID)
-        }
-    }
-
     /// A crossing is a banner on the Mac channel, as it always was; on the
     /// notch channel it is a card beside the notch, so choosing the notch
     /// really does keep Notification Center empty. The banner remains the
@@ -867,7 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ChannelNotifications.test()
             return
         }
-        if preferences.sessionEndSound { SessionChime.play(preferences.sessionEndSoundName) }
+        if preferences.usageResetSound { SessionChime.play(preferences.usageResetSoundName) }
         var notice = UsageResetEvent(providerID: "codenotch", providerName: "Codenotch",
                                      windowLabel: "", glyph: .claude,
                                      previousFraction: 0, currentFraction: 0, resetsAt: nil)
@@ -1008,7 +841,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         tokenRefresher?.stop()
         store?.stop()
-        activityCoordinator?.stop()
         notchFleet?.stop()
         // A language server this app started, if any. Left running it would
         // outlive the reason it exists and keep answering on loopback to

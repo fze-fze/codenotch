@@ -81,12 +81,6 @@ enum ChannelNotifications {
         }
     }
 
-    static func sessionEnded(name: String, blocked: Bool) {
-        post(title: blocked ? L10n.t("\(name) is waiting on you") : L10n.t("\(name) finished"),
-             body: blocked ? L10n.t("The agent stopped to ask you something.") : L10n.t("The agent's turn is done."),
-             thread: "session|\(name)")
-    }
-
     static func post(title: String, body: String, thread: String? = nil) {
         let content = UNMutableNotificationContent()
         content.title = title

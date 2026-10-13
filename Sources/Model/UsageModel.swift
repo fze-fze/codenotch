@@ -297,11 +297,6 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// Set when something is blocked right now. Deliberately separate from the
     /// windows: it is not a measurement, it is a door being shut.
     var block: UsageBlock?
-    /// Codex's account-wide token activity, when its profile endpoint returned
-    /// it. The optional top model is an enrichment from the desktop breakdown
-    /// endpoint; it never changes the profile token buckets. Other providers
-    /// leave this nil because they do not expose the same account-level data.
-    var tokenUsage: CodexTokenUsage? = nil
     /// The account's named tier, when the provider publishes one. Shown under
     /// the tooltip title. Nil when there is nothing to name.
     var plan: String? = nil

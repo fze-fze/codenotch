@@ -9,13 +9,6 @@ import SwiftUI
 /// `TOOLTIP_RENDER_PATH` and the frame is written there.
 @MainActor
 final class TooltipRenderTests: XCTestCase {
-    private func session(_ name: String, _ state: AgentSession.State,
-                         minutes: Int) -> AgentSession {
-        AgentSession(id: name, name: name, detail: "Terminal · usage-notch",
-                     state: state, waitingFor: state == .waiting ? "your answer" : nil,
-                     since: Date().addingTimeInterval(Double(-minutes) * 60))
-    }
-
     func testClaudeCardRendersUnusedResetsAndShrinksAfterExpiry() throws {
         let now = Date()
         let response = try UsageResponse.decoder.decode(UsageResponse.self, from: ClaudeResetFixture.futureUsage)
@@ -76,40 +69,6 @@ final class TooltipRenderTests: XCTestCase {
         XCTAssertLessThanOrEqual(width * 0.85, NotchLayout.cardTextWidth)
     }
 
-    func testTheCardLaysOutEverySessionState() throws {
-        let snapshot = ProviderSnapshot(
-            id: "claude", displayName: "Claude", glyph: .claude,
-            fidelity: .official, status: .ok,
-            windows: [LimitWindow(id: "session", label: "Session", usedFraction: 0.47)]
-        )
-        let activity = ActivitySummary(sessions: [
-            session("codenotch-6f", .idle, minutes: 0),
-            session("hivinz-web-2f", .busy, minutes: 1),
-            session("codenotch-18", .waiting, minutes: 3)
-        ])
-
-        let view = TooltipCard(snapshot: snapshot, activity: activity, now: Date())
-            .padding(20)
-            .background(Color.black)
-
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 3
-        let image = try XCTUnwrap(renderer.nsImage)
-
-        // Three sessions of two lines each, under the window rows: a card that
-        // silently collapsed would still render, just far too short.
-        XCTAssertGreaterThan(image.size.height, NotchLayout.cardWidth * 0.5,
-                             "the card laid out far shorter than three sessions need")
-        XCTAssertGreaterThan(image.size.width, NotchLayout.cardWidth)
-
-        if let path = ProcessInfo.processInfo.environment["TOOLTIP_RENDER_PATH"] {
-            let tiff = try XCTUnwrap(image.tiffRepresentation)
-            let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?
-                .representation(using: .png, properties: [:]))
-            try png.write(to: URL(fileURLWithPath: path))
-        }
-    }
-
     /// The Grok card: the pool on top, then the products under a titled
     /// group. A titled group after plain rows sits further down, and a card
     /// whose height left that out cut the last product off.
@@ -146,49 +105,6 @@ final class TooltipRenderTests: XCTestCase {
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.nsImage)
         if let path = ProcessInfo.processInfo.environment["TOOLTIP_RENDER_PATH"] {
-            let tiff = try XCTUnwrap(image.tiffRepresentation)
-            let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?
-                .representation(using: .png, properties: [:]))
-            try png.write(to: URL(fileURLWithPath: path))
-        }
-    }
-
-    func testCodexCardRendersAccountActivity() throws {
-        let usage = CodexTokenUsage(
-            summary: .init(lifetimeTokens: 280_000, peakDailyTokens: 150_000,
-                            longestRunningTurnSeconds: 4020,
-                            currentStreakDays: 2, longestStreakDays: 11),
-            dailyUsageBuckets: [
-                .init(startDate: "2026-08-25", tokens: 48_000),
-                .init(startDate: "2026-09-03", tokens: 192_000),
-                .init(startDate: "2026-09-08", tokens: 40_000)
-            ]
-        )
-        let snapshot = ProviderSnapshot(
-            id: "codex", displayName: "Codex", glyph: .openai,
-            fidelity: .official, status: .ok,
-            windows: [
-                LimitWindow(id: "primary", label: "5h limit", usedFraction: 0),
-                LimitWindow(id: "secondary", label: "Weekly limit", usedFraction: 0.28)
-            ],
-            tokenUsage: usage
-        )
-        let calendar = Calendar(identifier: .gregorian)
-        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 9))!
-        let view = TooltipCard(snapshot: snapshot, now: now)
-            .padding(20)
-            .background(Color.black)
-
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 3
-        let image = try XCTUnwrap(renderer.nsImage)
-        XCTAssertGreaterThan(
-            image.size.height,
-            NotchLayout.cardHeight(windowCount: 2) + NotchLayout.codexChartHeight,
-            "the account activity section was not included in the rendered card"
-        )
-
-        if let path = ProcessInfo.processInfo.environment["CODEX_TOOLTIP_RENDER_PATH"] {
             let tiff = try XCTUnwrap(image.tiffRepresentation)
             let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?
                 .representation(using: .png, properties: [:]))

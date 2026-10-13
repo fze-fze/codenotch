@@ -104,16 +104,11 @@ final class UsageStore: ObservableObject {
         ProviderOrder.arrange(providers, by: order, id: \.id)
     }
 
-    /// Whether any provider is actively being used right now. Your usage cannot
-    /// move while nothing is running, so polling hard through a quiet afternoon
-    /// spends rate-limit budget to re-read a number that has not changed.
-    var isBusy: () -> Bool = { false }
-
     /// Whether a look should refuse every reading a provider is holding, however
     /// new, and ask the provider itself — the "Ask the provider every time you
     /// look" setting.
     ///
-    /// A closure for the reason `isBusy` is one: the answer lives in
+    /// A closure because the answer lives in
     /// `Preferences` and changes while the store is running, and reading it as a
     /// stored value would answer with whatever it was at launch. It reaches only
     /// the *look*; the schedule asks for what the schedule asks for, so a
@@ -122,24 +117,10 @@ final class UsageStore: ObservableObject {
 
     /// How often the schedule *looks*, which is not how often it fetches.
     ///
-    /// Four times a minute, so the two things that have to happen promptly can:
-    /// a window rolling over is noticed within a tick rather than within a
-    /// minute, and a busy interval of any length under a minute is expressible
-    /// at all. Every tick that is not owed a fetch compares two dates and
+    /// Four times a minute, so a window rolling over is noticed within a tick
+    /// rather than within a minute. Every tick that is not owed a fetch compares two dates and
     /// returns — see `tick`.
     private let refreshInterval: TimeInterval
-    /// How often to fetch while something is actually running.
-    ///
-    /// The numbers only move while work is happening, so this is the one
-    /// stretch where polling harder buys something. Thirty seconds rather than
-    /// the old sixty: the measurement behind
-    /// `ClaudeOAuthProvider.desktopFreshness` had a session window moving
-    /// eleven points in fifteen minutes, so a minute is most of a point, and a
-    /// minute of them is a figure somebody is watching being wrong. It is not
-    /// lower than thirty because the providers that answer over the network
-    /// answer to a 429, and walking into one trades half a minute of lag for
-    /// fifteen minutes of it.
-    private let busyRefreshInterval: TimeInterval
     /// How long a snapshot stays believable after its last successful fetch.
     ///
     /// Comfortably above `idleRefreshInterval`, on purpose. With the two equal,
@@ -153,8 +134,6 @@ final class UsageStore: ObservableObject {
     /// How often to look when nothing is running.
     private let idleRefreshInterval: TimeInterval
     private var lastAttempt: Date?
-    /// When each provider last had a fetch asked of it by its work stopping.
-    private var lastWorkFinished: [String: Date] = [:]
     /// The least time between two refreshes somebody's attention asked for.
     ///
     /// Opening the menu, or putting the pointer on a ring, is the clearest
@@ -201,7 +180,6 @@ final class UsageStore: ObservableObject {
     init(
         providers: [UsageProvider],
         refreshInterval: TimeInterval = 15,
-        busyRefreshInterval: TimeInterval = 30,
         idleRefreshInterval: TimeInterval = 5 * 60,
         staleAfter: TimeInterval = 15 * 60,
         // Thirty times a normal pass, which is a second or two. High enough
@@ -217,7 +195,6 @@ final class UsageStore: ObservableObject {
         self.pollingNow = pollingNow
         self.providers = providers
         self.refreshInterval = refreshInterval
-        self.busyRefreshInterval = busyRefreshInterval
         self.idleRefreshInterval = idleRefreshInterval
         self.staleAfter = staleAfter
         self.refreshDeadline = refreshDeadline
@@ -328,10 +305,8 @@ final class UsageStore: ObservableObject {
         let now = pollingNow()
         let waited = lastAttempt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
         guard Self.shouldRefresh(
-            isBusy: isBusy(),
             sinceLastAttempt: waited,
             idleInterval: idleRefreshInterval,
-            busyInterval: busyRefreshInterval,
             resetDue: Self.hasWindowRolledOver(in: snapshots, since: lastAttempt, at: now)
         ) else { return }
         refreshNow()
@@ -357,28 +332,17 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    /// Poll at the busy rate while something is running, at once when a window
-    /// has just rolled over, and otherwise wait out the idle interval. Pure, so
-    /// the schedule can be tested without a clock.
-    ///
-    /// `busyInterval` defaults to zero, which is "every tick" — the behaviour
-    /// from when the tick *was* the interval. What the app passes is the real
-    /// spacing; the tick is now four times a minute and a fetch on each of them
-    /// is neither wanted nor affordable.
+    /// Poll at once when a window has just rolled over, and otherwise wait out
+    /// the idle interval. Pure, so the schedule can be tested without a clock.
     static func shouldRefresh(
-        isBusy: Bool,
         sinceLastAttempt: TimeInterval,
         idleInterval: TimeInterval,
-        busyInterval: TimeInterval = 0,
         resetDue: Bool = false
     ) -> Bool {
-        if resetDue { return true }
-        if isBusy { return sinceLastAttempt >= busyInterval }
-        return sinceLastAttempt >= idleInterval
+        resetDue || sinceLastAttempt >= idleInterval
     }
 
-    /// Whether an event outside the schedule — a look, a run that just
-    /// finished — is owed a fetch of its own, or falls inside one already taken.
+    /// Whether an event outside the schedule — a look — is owed a fetch of its own, or falls inside one already taken.
     /// Pure, for the reason `shouldRefresh` is.
     static func shouldRefreshOnEvent(sinceLastRefresh: TimeInterval,
                                      spacing: TimeInterval) -> Bool {
@@ -386,16 +350,8 @@ final class UsageStore: ObservableObject {
     }
 
     func refreshNow() {
-        refreshNow(freshness: freshnessWanted)
+        refreshNow(freshness: .standard)
     }
-
-    /// What the numbers on screen are worth at this moment.
-    ///
-    /// While something is running they are moving, so a provider's own cached
-    /// source is no longer good enough to answer with — see `UsageFreshness`.
-    /// While nothing is running the cache is the better answer: it is free, and
-    /// it cannot be wrong about a number that is not changing.
-    private var freshnessWanted: UsageFreshness { isBusy() ? .live : .standard }
 
     func refreshNow(freshness: UsageFreshness) {
         guard !isRefreshing else {
@@ -409,27 +365,6 @@ final class UsageStore: ObservableObject {
             self?.finish()
         }
         armDeadline()
-    }
-
-    /// A provider's work has just stopped, so its number has just finished
-    /// moving — and the schedule is about to drop to the idle interval and leave
-    /// it alone for five minutes.
-    ///
-    /// That is the number people come to this app for: what the run they just
-    /// watched actually cost. Asking on the falling edge is what puts it on the
-    /// menu bar within a second or two instead of within five minutes.
-    ///
-    /// Spaced per provider, because a session's state is read from a transcript
-    /// and legitimately flickers between busy and waiting several times through
-    /// one long run. At the busy interval, a flickering monitor costs exactly
-    /// what running flat out already costs and no more.
-    func refreshBecauseWorkFinished(providerID: String) {
-        let now = pollingNow()
-        let waited = lastWorkFinished[providerID].map { now.timeIntervalSince($0) }
-            ?? .greatestFiniteMagnitude
-        guard Self.shouldRefreshOnEvent(sinceLastRefresh: waited, spacing: busyRefreshInterval) else { return }
-        lastWorkFinished[providerID] = now
-        refresh(providerID: providerID)
     }
 
     /// Somebody is about to read these numbers: the menu is opening, or the
@@ -510,7 +445,7 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
-        await refresh(freshness: freshnessWanted)
+        await refresh(freshness: .standard)
     }
 
     func refresh(freshness: UsageFreshness) async {
@@ -818,12 +753,7 @@ final class UsageStore: ObservableObject {
     var isRefreshingForTesting: Bool { isRefreshing }
     var inFlightForTesting: Set<String> { Set(fetchTasks.keys) }
     var idleRefreshIntervalForTesting: TimeInterval { idleRefreshInterval }
-    /// Exposed together, so a test can hold the shipped schedule to the shape it
-    /// claims rather than to whatever the numbers happen to be: a tick fine
-    /// enough to express the busy interval, and a busy interval well inside the
-    /// idle one.
     var refreshIntervalForTesting: TimeInterval { refreshInterval }
-    var busyRefreshIntervalForTesting: TimeInterval { busyRefreshInterval }
     var onLookIntervalForTesting: TimeInterval { onLookInterval }
     /// Exposed so a test can wait for what a fire-and-forget refresh started,
     /// rather than sleeping for a plausible length of time and hoping.

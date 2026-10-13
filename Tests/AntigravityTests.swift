@@ -1139,48 +1139,6 @@ final class AntigravityActivityMonitorTests: XCTestCase {
         return file
     }
 
-    func testAJustWrittenTranscriptReadsAsWorking() throws {
-        try transcript("t1", modified: Date())
-        let sessions = AntigravityActivityMonitor.read(root: root, staleAfter: 45)
-        XCTAssertEqual(sessions.count, 1)
-        XCTAssertEqual(sessions.first?.state, .busy)
-        XCTAssertEqual(sessions.first?.name, "Antigravity")
-    }
-
-    /// A finished turn is not work in progress.
-    func testAnOldTranscriptIsNotWorking() throws {
-        try transcript("t1", modified: Date().addingTimeInterval(-600))
-        XCTAssertTrue(AntigravityActivityMonitor.read(root: root, staleAfter: 45).isEmpty)
-    }
-
-    /// Many conversations accumulate; only the newest says what is happening now.
-    func testTheNewestTranscriptWins() throws {
-        try transcript("old", modified: Date().addingTimeInterval(-600))
-        try transcript("live", modified: Date())
-        let sessions = AntigravityActivityMonitor.read(root: root, staleAfter: 45)
-        XCTAssertEqual(sessions.count, 1)
-        XCTAssertEqual(sessions.first?.id, "antigravity.live")
-    }
-
-    func testAnIdleTranscriptIsCleanedUpQuickly() throws {
-        try transcript("idle", modified: Date().addingTimeInterval(-10), content: "{\"type\": \"PLANNER_RESPONSE\"}")
-        let sessions = AntigravityActivityMonitor.read(root: root, staleAfter: 45)
-        XCTAssertTrue(sessions.isEmpty)
-    }
-
-    func testAWaitingTranscriptPersists() throws {
-        let waitingJSON = "{\"type\": \"PLANNER_RESPONSE\", \"tool_calls\": [{\"name\": \"ask_question\"}]}"
-        try transcript("waiting", modified: Date().addingTimeInterval(-600), content: waitingJSON)
-        let sessions = AntigravityActivityMonitor.read(root: root, staleAfter: 45)
-        XCTAssertEqual(sessions.count, 1)
-        XCTAssertEqual(sessions.first?.state, .waiting)
-        XCTAssertEqual(sessions.first?.detail, "Question")
-    }
-
-    func testNoTranscriptsIsQuietRatherThanAnError() {
-        let absent = root.appendingPathComponent("nowhere")
-        XCTAssertTrue(AntigravityActivityMonitor.read(root: absent, staleAfter: 45).isEmpty)
-    }
 }
 
 /// The "Open" button on an account row. The reading is borrowed from an app on

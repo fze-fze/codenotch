@@ -188,23 +188,6 @@ final class CodexProfileTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: work.authURL), originalAuth)
     }
 
-    @MainActor
-    func testActivityUsesEachProfilesStoreAndDistinctSessionIDs() throws {
-        let root = try home([".codex": [], ".codex-work": []])
-        let personal = CodexProfile.default(home: root)
-        let work = CodexProfile(slug: "work", configDirectory: root.appendingPathComponent(".codex-work"))
-        try catalogue(profile: personal, title: "Personal task")
-        try catalogue(profile: work, title: "Work task")
-        let p = CodexActivityMonitor(profile: personal)
-        let w = CodexActivityMonitor(profile: work)
-        p.start(); w.start()
-        defer { p.stop(); w.stop() }
-        XCTAssertEqual(p.sessions.map(\.id), ["codex.desktop"])
-        XCTAssertEqual(w.sessions.map(\.id), ["codex-work.desktop"])
-        XCTAssertEqual(p.sessions.map(\.name), ["Personal task"])
-        XCTAssertEqual(w.sessions.map(\.name), ["Work task"])
-    }
-
     private func catalogue(profile: CodexProfile, title: String) throws {
         try FileManager.default.createDirectory(at: profile.desktopStoreURL.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -215,28 +198,6 @@ final class CodexProfileTests: XCTestCase {
         XCTAssertEqual(sqlite3_exec(db, "INSERT INTO local_thread_catalog VALUES (\(Date().timeIntervalSince1970), '\(title)', 'test')", nil, nil, nil), SQLITE_OK)
     }
 
-    @MainActor
-    func testCLIActivityWithTheSameRolloutFilenameDoesNotCollide() throws {
-        let root = try home([".codex": [], ".codex-work": []])
-        let personal = CodexProfile.default(home: root)
-        let work = CodexProfile(slug: "work", configDirectory: root.appendingPathComponent(".codex-work"))
-        for profile in [personal, work] {
-            let rollout = profile.configDirectory.appendingPathComponent("rollout.jsonl")
-            try Data().write(to: rollout)
-            var db: OpaquePointer?
-            XCTAssertEqual(sqlite3_open(profile.stateURL.path, &db), SQLITE_OK)
-            defer { sqlite3_close(db) }
-            XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE threads (rollout_path TEXT, archived INTEGER, updated_at_ms INTEGER)", nil, nil, nil), SQLITE_OK)
-            XCTAssertEqual(sqlite3_exec(db, "INSERT INTO threads VALUES ('\(rollout.path)', 0, 1)", nil, nil, nil), SQLITE_OK)
-        }
-        let p = CodexActivityMonitor(profile: personal)
-        let w = CodexActivityMonitor(profile: work)
-        p.start(); w.start()
-        defer { p.stop(); w.stop() }
-        XCTAssertEqual(p.sessions.map(\.id), ["codex.rollout.jsonl"])
-        XCTAssertEqual(w.sessions.map(\.id), ["codex-work.rollout.jsonl"])
-        XCTAssertEqual(w.sessions.map(\.name), ["Codex (work)"])
-    }
 }
 
 /// Stateless: tests can run concurrently without a shared request queue.

@@ -26,7 +26,7 @@ extension View {
 /// crossing-and-notification machinery it switches is Notifications' to
 /// explain.
 private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case accounts, phone, appearance, notifications, costs, general
+    case accounts, phone, appearance, notifications, general
 
     /// The sections the sidebar lists; Phone only once pairing is offered.
     static var visible: [SettingsSection] {
@@ -41,7 +41,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .phone:         return L10n.t("Phone")
         case .appearance:    return L10n.t("Appearance")
         case .notifications: return L10n.t("Notifications")
-        case .costs:         return L10n.t("Costs")
         case .general:       return L10n.t("General")
         }
     }
@@ -53,7 +52,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .phone:         return L10n.t("See your usage on your phone.")
         case .appearance:    return L10n.t("How the notch looks and where it sits.")
         case .notifications: return L10n.t("What Codenotch tells you, and when.")
-        case .costs:         return L10n.t("What each project spent of each login's allowance.")
         case .general:       return L10n.t("Startup, updates and everything else.")
         }
     }
@@ -64,7 +62,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .phone:         return "iphone"
         case .appearance:    return "paintbrush.fill"
         case .notifications: return "bell.badge.fill"
-        case .costs:         return "banknote.fill"
         case .general:       return "gearshape.fill"
         }
     }
@@ -78,7 +75,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .phone:         return .green
         case .appearance:    return .indigo
         case .notifications: return .red
-        case .costs:         return .mint
         case .general:       return .gray
         }
     }
@@ -585,7 +581,6 @@ struct SettingsView: View {
         switch section {
         case .accounts:      accountsPane
         case .phone:         phonePane
-        case .costs:         CostSettingsPane()
         case .appearance:    appearancePane
         case .notifications: notificationsPane
         case .general:       generalPane
@@ -1076,51 +1071,11 @@ struct SettingsView: View {
                     Button(L10n.t("Send a test")) { sendTestNotification() }
                     Text(preferences.notificationChannel == .mac
                          ? L10n.t("Opens System Settings when banners are off for Codenotch.")
-                         : L10n.t("The notch opens for a moment, with the session sound."))
+                         : L10n.t("The notch opens for a moment, with the reset sound."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-
-            // Its own section rather than a line in General: this is the only
-            // part of the app that speaks first, and a switch that stops the
-            // Mac making a noise has to be findable by someone who is looking
-            // for exactly that and nothing else.
-            Section(L10n.t("When a session ends")) {
-                Toggle(L10n.t("Open the notch for a moment"), isOn: $preferences.announceSessionEnd)
-
-                Picker(L10n.t("For"), selection: $preferences.peekDuration) {
-                    ForEach(PeekDuration.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .disabled(!preferences.announceSessionEnd)
-
-                Text(preferences.peekDuration.explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle(L10n.t("Play a sound"), isOn: $preferences.sessionEndSound)
-
-                // Two sounds, because the two events say different things: one
-                // is "that's done", the other is "you are the hold-up". Each
-                // has a preview beside it — picking an alert sound you cannot
-                // hear until the next time it fires is guesswork.
-                SoundRow(label: L10n.t("Finished"), name: $preferences.sessionEndSoundName,
-                         pickerEnabled: preferences.sessionEndSound)
-                SoundRow(label: L10n.t("Waiting on you"), name: $preferences.sessionBlockedSoundName,
-                         pickerEnabled: preferences.sessionEndSound)
-
-                Text(L10n.t("Codenotch already knows the moment an agent stops working or stops to ask you something. Clicking the notch while it is open brings that session's app to the front — the app, not the tab: only some terminals let anything outside them choose a tab, so the tooltip names the session instead."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(L10n.t("The sound plays on the ordinary output, not the interface sound-effects channel — so it is still heard with \u{201C}Play user interface sound effects\u{201D} switched off in System Settings → Sound."))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section(L10n.t("When a limit is reached")) {

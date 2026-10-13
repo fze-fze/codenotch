@@ -11,7 +11,6 @@ struct PhoneLinkSnapshotBuilder {
 
     static func build(
         snapshots: [ProviderSnapshot],
-        sessions: [AgentSession],
         disconnected: Set<String>,
         order: [String],
         serverName: String,
@@ -90,25 +89,8 @@ struct PhoneLinkSnapshotBuilder {
             providers.append(p)
         }
         
-        var sessionsOut: [PhoneLinkSnapshot.Session] = []
-        for s in sessions {
-            var stateStr = "idle"
-            switch s.state {
-            case .busy: stateStr = "busy"
-            case .waiting: stateStr = "waiting"
-            case .success, .idle: stateStr = "idle"
-            }
-            
-            sessionsOut.append(PhoneLinkSnapshot.Session(
-                id: s.id,
-                name: s.name,
-                detail: s.detail,
-                state: stateStr,
-                waitingFor: s.waitingFor,
-                since: formatISO(s.since)
-            ))
-        }
-        
-        return PhoneLinkSnapshot(server: server, providers: providers, sessions: sessionsOut)
+        // The wire format keeps its `sessions` array for the phone, which
+        // expects it; Codenotch no longer tracks sessions, so it is empty.
+        return PhoneLinkSnapshot(server: server, providers: providers, sessions: [])
     }
 }

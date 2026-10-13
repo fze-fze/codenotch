@@ -356,67 +356,6 @@ extension SplitRow where Accessory == EmptyView {
     }
 }
 
-/// The ring beside a session's status.
-///
-/// Turning while the agent is working, still when it is not — so the row says
-/// what is happening before the word is read.
-private struct StatusRing: View {
-    let state: AgentSession.State
-    let color: Color
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// One turn, in seconds. Slow enough to read as deliberate rather than as
-    /// something struggling.
-    private static let period: Double = 1.4
-
-    var body: some View {
-        Group {
-            switch state {
-            case .busy:
-                if reduceMotion {
-                    // Still, but still three-quarters: the gap alone says
-                    // "in progress" without anything moving.
-                    ring(trim: 0.75)
-                } else {
-                    // A timeline rather than `repeatForever`. An endless
-                    // animation has to be cancelled to stop, and setting the
-                    // value it is already heading towards does not cancel it —
-                    // which is exactly how the refresh ring here once span for
-                    // ever. Derived from the clock, it simply stops being drawn.
-                    TimelineView(.animation) { context in
-                        ring(trim: 0.75)
-                            .rotationEffect(.degrees(angle(at: context.date)))
-                    }
-                }
-            case .waiting, .success:
-                // Half a ring, held still: blocked, not progressing. (Or a full ring for success).
-                // Wait, if we want success to be a full ring, we can use 1.0 trim for success.
-                ring(trim: state == .success ? 1.0 : 0.5)
-            case .idle:
-                ring(trim: 1)
-            }
-        }
-        .frame(width: NotchLayout.statusDot, height: NotchLayout.statusDot)
-    }
-
-    private func ring(trim: CGFloat) -> some View {
-        Circle()
-            .trim(from: 0, to: trim)
-            .stroke(color,
-                    style: StrokeStyle(lineWidth: NotchLayout.statusDotStroke, lineCap: .round))
-            // Start the gap at the top, where the eye lands first.
-            .rotationEffect(.degrees(-90))
-    }
-
-    private func angle(at date: Date) -> Double {
-        let turns = date.timeIntervalSinceReferenceDate / Self.period
-        return turns.truncatingRemainder(dividingBy: 1) * 360
-    }
-}
-
-// MARK: - Providers
-
 /// One metered window: label and reset copy on a line, a track bar, then the
 /// percentage burned.
 private struct LimitWindowRow: View {
@@ -668,105 +607,6 @@ private struct ProviderTooltip: View {
     }
 }
 
-enum UsageFormat {
-    static func tokens(_ value: Int?) -> String {
-        guard let value else { return "—" }
-        switch value {
-        case 1_000_000_000...:
-            return String(format: "%.2fB", locale: Locale(identifier: "en_US_POSIX"),
-                          Double(value) / 1_000_000_000)
-        case 1_000_000...:
-            return String(format: "%.1fM", locale: Locale(identifier: "en_US_POSIX"),
-                          Double(value) / 1_000_000)
-        case 1_000...:
-            return String(format: "%.0fK", locale: Locale(identifier: "en_US_POSIX"),
-                          Double(value) / 1_000)
-        default:
-            return "\(value)"
-        }
-    }
-
-    static func duration(seconds: Double?) -> String {
-        guard let seconds, seconds.isFinite, seconds > 0 else { return "—" }
-        let minutes = max(1, Int((seconds / 60).rounded()))
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        if hours > 0 {
-            return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
-        }
-        return "\(minutes)m"
-    }
-
-    static func days(_ value: Int?) -> String {
-        guard let value else { return "—" }
-        return "\(value)d"
-    }
-}
-
-
-private struct CodexMetric: Identifiable {
-    let id: String
-    let value: String
-    let label: String
-}
-
-private struct CodexMetricList: View {
-    let metrics: [CodexMetric]
-    @Environment(\.tooltipSecondaryInk) private var secondaryInk
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: NotchLayout.codexMetricRowGap) {
-            ForEach(metrics) { metric in
-                HStack(alignment: .firstTextBaseline, spacing: Design.px(20)) {
-                    Text(metric.label)
-                        .font(Typography.cardBody)
-                        .foregroundStyle(Palette.textPrimary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 0)
-
-                    Text(metric.value)
-                        .font(Typography.cardBody)
-                        .foregroundStyle(secondaryInk)
-                        .lineLimit(1)
-                        .monospacedDigit()
-                }
-                .frame(height: NotchLayout.codexMetricRowHeight)
-            }
-        }
-        .frame(height: NotchLayout.codexMetricHeight)
-    }
-}
-
-private struct CodexDailyUsageChart: View {
-    let buckets: [CodexTokenUsage.DailyBucket]
-    let maximum: Int
-    @Environment(\.tooltipSecondaryInk) private var secondaryInk
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .bottomLeading) {
-                Rectangle()
-                    .fill(Palette.ringTrack)
-                    .frame(height: NotchLayout.hairline)
-
-                HStack(alignment: .bottom, spacing: Design.px(4)) {
-                    ForEach(buckets) { bucket in
-                        RoundedRectangle(cornerRadius: Design.px(3), style: .continuous)
-                            .fill(secondaryInk)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: proxy.size.height
-                                   * CGFloat(bucket.tokens) / CGFloat(maximum))
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            }
-        }
-        .frame(height: NotchLayout.codexChartHeight)
-        .clipped()
-    }
-}
-
 /// Unused rate-limit resets on this account.
 private struct UsageResetCreditsSection: View {
     let credits: UsageResetCredits
@@ -844,66 +684,6 @@ private struct UsageResetCreditsSection: View {
     }
 }
 
-/// Account-wide Codex activity. Unlike the quota rows above, this is sourced
-/// from the Codex profile usage endpoint and is not a local estimate.
-private struct CodexUsageSection: View {
-    let usage: CodexTokenUsage
-    let now: Date
-
-    private var buckets: [CodexTokenUsage.DailyBucket] {
-        usage.last30Days(now: now)
-    }
-
-    private var maximum: Int {
-        max(1, buckets.map(\.tokens).max() ?? 0)
-    }
-
-    private var todayText: String {
-        usage.usageToday(now: now).map { UsageFormat.tokens($0) } ?? L10n.t("Pending")
-    }
-
-    private var metrics: [CodexMetric] {
-        let summary = usage.summary
-        return [
-            CodexMetric(id: "lifetime", value: UsageFormat.tokens(summary?.lifetimeTokens),
-                        label: L10n.t("Lifetime tokens")),
-            CodexMetric(id: "peak", value: UsageFormat.tokens(summary?.peakDailyTokens),
-                        label: L10n.t("Peak tokens")),
-            CodexMetric(id: "longest", value: UsageFormat.duration(
-                seconds: summary?.longestRunningTurnSeconds), label: L10n.t("Longest chat")),
-            CodexMetric(id: "current-streak", value: UsageFormat.days(
-                summary?.currentStreakDays), label: L10n.t("Current streak")),
-            CodexMetric(id: "longest-streak", value: UsageFormat.days(
-                summary?.longestStreakDays), label: L10n.t("Longest streak"))
-        ]
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Rectangle()
-                .fill(Palette.ringTrack)
-                .frame(height: NotchLayout.hairline)
-                .padding(.top, NotchLayout.codexUsageTop)
-
-            CodexMetricList(metrics: metrics)
-                .padding(.top, NotchLayout.codexMetricTop)
-                .padding(.bottom, NotchLayout.codexMetricBottom)
-
-            Rectangle()
-                .fill(Palette.ringTrack)
-                .frame(height: NotchLayout.hairline)
-
-            SplitRow(leading: L10n.t("Today"), trailing: todayText)
-                .padding(.top, NotchLayout.blockSpacing)
-            SplitRow(leading: L10n.t("30-day tokens"),
-                     trailing: UsageFormat.tokens(usage.usageInLast30Days(now: now)))
-                .padding(.top, NotchLayout.codexUsageRowGap)
-            CodexDailyUsageChart(buckets: buckets, maximum: maximum)
-                .padding(.top, NotchLayout.codexChartTop)
-        }
-    }
-}
-
 /// The line that says you are stopped.
 ///
 /// Deliberately loud where the rest of the card is quiet: it is the one thing
@@ -927,129 +707,13 @@ private struct BlockedRow: View {
 
 // MARK: - Activity
 
-private struct SessionRow: View {
-    let session: AgentSession
-    let now: Date
-    /// Set when rows can be clicked to jump to the session's terminal.
-    var onFocus: ((pid_t) -> Void)? = nil
-    @Environment(\.codenotchAccentColor) private var accentColor
-    @Environment(\.tooltipSecondaryInk) private var secondaryInk
-
-    private var stateColor: Color {
-        switch session.state {
-        case .busy:    return Palette.textPrimary
-        case .waiting: return Palette.watch
-        case .success: return Palette.ample
-        case .idle:    return secondaryInk
-        }
-    }
-
-    private var stateWord: String {
-        switch session.state {
-        case .busy:    return L10n.t("working")
-        case .waiting: return L10n.t("waiting")
-        case .success: return L10n.t("complete")
-        case .idle:    return L10n.t("idle")
-        }
-    }
-
-    /// While blocked, what it is blocked on matters more than where it lives.
-    private var detail: String {
-        if session.state == .waiting, let waitingFor = session.waitingFor, !waitingFor.isEmpty {
-            return waitingFor
-        }
-        return session.detail
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SplitRow(leading: session.name, trailing: stateWord,
-                     trailingColor: stateColor) {
-                StatusRing(state: session.state, color: stateColor)
-            }
-            SplitRow(
-                leading: detail,
-                trailing: ElapsedCopy.text(since: session.since, now: now),
-                leadingColor: secondaryInk
-            )
-            .padding(.top, NotchLayout.sessionRowGap)
-        }
-        // Sessions that publish a pid can be jumped to; the rest are text,
-        // and a gesture on them would promise something it cannot do.
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard let pid = session.processID else { return }
-            onFocus?(pid)
-        }
-    }
-}
-
-/// The live sessions for this provider, under a rule that separates them from
-/// the limit windows above — they answer a different question.
-private struct SessionList: View {
-    let summary: ActivitySummary
-    let now: Date
-    /// How many rows this screen has room for; the rest are counted.
-    let cap: Int
-    var onFocus: ((pid_t) -> Void)? = nil
-    @Environment(\.tooltipSecondaryInk) private var secondaryInk
-
-    /// Busy sessions first, so what is hidden is what matters least.
-    private var ordered: [AgentSession] {
-        summary.sessions.sorted { a, b in
-            let rank: (AgentSession) -> Int = {
-                switch $0.state { case .waiting: 0; case .busy: 1; case .success: 2; case .idle: 3 }
-            }
-            return rank(a) == rank(b) ? a.since > b.since : rank(a) < rank(b)
-        }
-    }
-
-    private var shown: [AgentSession] { Array(ordered.prefix(max(0, cap))) }
-    private var hidden: Int { max(0, summary.sessions.count - shown.count) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Rectangle()
-                .fill(Palette.ringTrack)
-                .frame(height: NotchLayout.hairline)
-                .padding(.top, NotchLayout.blockSpacing)
-
-            // Only as many as the card's budgeted height can hold. The rest
-            // are counted rather than drawn: the card is clipped, not scrolled,
-            // so anything past the budget silently pushes the title off the top.
-            ForEach(Array(shown.enumerated()), id: \.element.id) { index, session in
-                SessionRow(session: session, now: now, onFocus: onFocus)
-                    .padding(.top, NotchLayout.blockSpacing)
-            }
-
-            if hidden > 0 {
-                Text(L10n.t("and \(hidden) more"))
-                    .font(Typography.cardBody)
-                    .foregroundStyle(secondaryInk)
-                    .padding(.top, NotchLayout.blockSpacing)
-            }
-        }
-    }
-}
-
-// MARK: - Entry point
-
 struct TooltipCard: View {
     let snapshot: ProviderSnapshot
-    var activity: ActivitySummary?
     let now: Date
     /// Which way the card sits from the notch, which follows from the edge.
     var direction: NotchEdge.TooltipDirection = .leading
-    /// How many sessions this screen has room to list. Solved from the display
-    /// rather than fixed, so a big screen hides nothing.
-    var sessionCap: Int = NotchLayout.defaultSessionCap
-    /// Project rows the cost section may list, as the view model solved it.
-    var costRows: Int = 0
     var resetTimeFormat: ResetTimeFormat = .automatic
     var tailOffset: CGFloat = 0
-    /// A tap on a session row jumps to that session's terminal — nil leaves
-    /// the rows as plain text.
-    var onFocusSession: ((pid_t) -> Void)? = nil
     @AppStorage(Preferences.showUsagePaceKey) private var showUsagePace = false
 
     /// The same figure the hover region uses, so what is drawn and what is
@@ -1059,15 +723,11 @@ struct TooltipCard: View {
             windowCount: snapshot.windows.count,
             groupCount: snapshot.windowGroupCount, leadsWithGroup: snapshot.leadsWithGroup,
             moneyWindowCount: snapshot.windows.filter { $0.money != nil }.count,
-            sessionCount: activity?.sessions.count ?? 0,
-            sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,
             blockMessage: snapshot.block?.summary(now: now),
-            hasTokenUsage: snapshot.tokenUsage != nil,
             hasPlan: snapshot.plan != nil,
             hasResetCredits: snapshot.availableResetCredits(at: now) != nil,
-            compactRowCount: snapshot.compactRowCount,
-            costRows: costRows
+            compactRowCount: snapshot.compactRowCount
         )
     }
 
@@ -1083,16 +743,6 @@ struct TooltipCard: View {
                                     showUsagePace: showUsagePace)
                     if let resetCredits = snapshot.availableResetCredits(at: now) {
                         UsageResetCreditsSection(credits: resetCredits, now: now)
-                    }
-                    if let tokenUsage = snapshot.tokenUsage {
-                        CodexUsageSection(usage: tokenUsage, now: now)
-                    }
-                    if let activity {
-                        SessionList(summary: activity, now: now, cap: sessionCap,
-                                    onFocus: onFocusSession)
-                    }
-                    if costRows > 0, let model = CostModels.model(for: snapshot.id) {
-                        CostSection(model: model, rows: costRows)
                     }
                 }
                 // An identity, so one provider's rows are never interpolated

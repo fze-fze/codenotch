@@ -59926,6 +59926,23 @@
           }
         }
       }
+    },
+    "The notch opens for a moment, with the reset sound.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刘海会打开一小会儿，并播放重置提示音。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "瀏海會打開一小會兒，並播放重置提示音。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

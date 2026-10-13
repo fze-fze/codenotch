@@ -1,89 +1,5 @@
 import Foundation
 
-/// Account-wide Codex activity returned by the Codex profile endpoint.
-///
-/// `/wham/profiles/me` reports token totals in daily buckets and account-level
-/// summary statistics.
-struct CodexTokenUsage: Codable, Equatable, Sendable {
-    struct Summary: Codable, Equatable, Sendable {
-        let lifetimeTokens: Int?
-        let peakDailyTokens: Int?
-        let longestRunningTurnSeconds: Double?
-        let currentStreakDays: Int?
-        let longestStreakDays: Int?
-
-        init(lifetimeTokens: Int? = nil,
-             peakDailyTokens: Int? = nil,
-             longestRunningTurnSeconds: Double? = nil,
-             currentStreakDays: Int? = nil,
-             longestStreakDays: Int? = nil) {
-            self.lifetimeTokens = lifetimeTokens
-            self.peakDailyTokens = peakDailyTokens
-            self.longestRunningTurnSeconds = longestRunningTurnSeconds
-            self.currentStreakDays = currentStreakDays
-            self.longestStreakDays = longestStreakDays
-        }
-    }
-
-    struct DailyBucket: Codable, Equatable, Identifiable, Sendable {
-        let startDate: String
-        let tokens: Int
-
-        var id: String { startDate }
-
-        init(startDate: String, tokens: Int) {
-            self.startDate = startDate
-            self.tokens = tokens
-        }
-    }
-
-    let summary: Summary?
-    let dailyUsageBuckets: [DailyBucket]
-
-    init(summary: Summary? = nil,
-         dailyUsageBuckets: [DailyBucket] = []) {
-        self.summary = summary
-        self.dailyUsageBuckets = dailyUsageBuckets
-    }
-
-    /// The consecutive calendar days represented by the card's chart.
-    func last30Days(now: Date = Date(), calendar: Calendar = .current) -> [DailyBucket] {
-        let today = calendar.startOfDay(for: now)
-        var values: [String: DailyBucket] = [:]
-        for bucket in dailyUsageBuckets {
-            values[bucket.startDate] = bucket
-        }
-
-        return (0..<30).compactMap { offset in
-            guard let date = calendar.date(byAdding: .day, value: offset - 29, to: today)
-            else { return nil }
-            let key = Self.dayKey(for: date, calendar: calendar)
-            return values[key] ?? DailyBucket(startDate: key, tokens: 0)
-        }
-    }
-
-    func usageInLast30Days(now: Date = Date(), calendar: Calendar = .current) -> Int {
-        last30Days(now: now, calendar: calendar).reduce(0) { $0 + $1.tokens }
-    }
-
-    /// A missing current-day bucket means the server has not published today's
-    /// usage yet. A present zero is a real zero, not a pending value.
-    func usageToday(now: Date = Date(), calendar: Calendar = .current) -> Int? {
-        let key = Self.dayKey(for: calendar.startOfDay(for: now), calendar: calendar)
-        return dailyUsageBuckets.first(where: { $0.startDate == key })?.tokens
-    }
-
-    var peakDailyTokens: Int? {
-        summary?.peakDailyTokens ?? dailyUsageBuckets.map(\.tokens).max()
-    }
-
-    private static func dayKey(for date: Date, calendar: Calendar) -> String {
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d",
-                      components.year ?? 0, components.month ?? 0, components.day ?? 0)
-    }
-}
-
 /// The account's main rate-limit windows belong in the usage rings. Spark
 /// (`additional_rate_limits`) and code review belong on the hover card, not
 /// the rings.
@@ -146,24 +62,6 @@ enum CodexUsage {
             }
             limit = number(.limit); used = number(.used); used_percent = number(.used_percent); reset_at = number(.reset_at)
         }
-    }
-
-    private struct ProfileUsageResponse: Decodable {
-        let stats: ProfileStats?
-    }
-
-    private struct ProfileStats: Decodable {
-        let lifetime_tokens: Int?
-        let peak_daily_tokens: Int?
-        let longest_running_turn_sec: Double?
-        let current_streak_days: Int?
-        let longest_streak_days: Int?
-        let daily_usage_buckets: [ProfileDailyBucket]?
-    }
-
-    private struct ProfileDailyBucket: Decodable {
-        let start_date: String
-        let tokens: Int
     }
 
     private struct RateLimit: Decodable {
@@ -335,30 +233,6 @@ enum CodexUsage {
     /// The account tier the usage payload names, when it names one.
     static func plan(from data: Data) -> String? {
         (try? JSONDecoder().decode(Response.self, from: data))?.plan_type?.nonEmptyPlan
-    }
-
-    /// Decode the profile endpoint's token statistics.
-    static func profileUsage(from data: Data) throws -> CodexTokenUsage {
-        do {
-            let response = try JSONDecoder().decode(ProfileUsageResponse.self, from: data)
-            let stats = response.stats
-            return CodexTokenUsage(
-                summary: stats.map {
-                    .init(lifetimeTokens: $0.lifetime_tokens,
-                          peakDailyTokens: $0.peak_daily_tokens,
-                          longestRunningTurnSeconds: $0.longest_running_turn_sec,
-                          currentStreakDays: $0.current_streak_days,
-                          longestStreakDays: $0.longest_streak_days)
-                },
-                dailyUsageBuckets: stats?.daily_usage_buckets?.map {
-                    .init(startDate: $0.start_date, tokens: $0.tokens)
-                } ?? []
-            )
-        } catch let error as UsageProviderError {
-            throw error
-        } catch {
-            throw UsageProviderError.badResponse(status: 0)
-        }
     }
 
     /// Decode the ChatGPT backend list of unused rate-limit resets.

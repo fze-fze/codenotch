@@ -357,28 +357,6 @@ final class UsageArchiveTests: XCTestCase {
         XCTAssertEqual(UsageArchive(defaults: defaults).load()["claude"]?.snapshot.plan, "Enterprise")
     }
 
-    func testCodexDailyUsageRoundTripsWithTheQuotaReading() {
-        let defaults = makeDefaults()
-        let usage = CodexTokenUsage(
-            summary: .init(lifetimeTokens: 90, peakDailyTokens: 90,
-                            longestRunningTurnSeconds: 3600,
-                            currentStreakDays: 1, longestStreakDays: 3),
-            dailyUsageBuckets: [.init(
-                startDate: "2026-09-08", tokens: 90
-            )]
-        )
-        let snapshot = ProviderSnapshot(
-            id: "codex", displayName: "Codex", glyph: .openai,
-            fidelity: .official, status: .ok,
-            windows: [LimitWindow(id: "primary", label: "5h limit", usedFraction: 0.2)],
-            tokenUsage: usage
-        )
-        UsageArchive(defaults: defaults).save(["codex": (snapshot, Date())])
-
-        let restored = UsageArchive(defaults: defaults).load()["codex"]?.snapshot
-        XCTAssertEqual(restored?.tokenUsage, usage)
-    }
-
     /// A restored reading is never presented as live.
     func testRestoredReadingsComeBackStale() throws {
         let defaults = makeDefaults()
@@ -454,29 +432,23 @@ final class BackoffPersistenceTests: XCTestCase {
     }
 }
 
-/// Your usage cannot move while nothing is running, so polling hard through a
-/// quiet afternoon spends rate-limit budget re-reading an unchanged number.
+/// The schedule waits out the idle interval, except at the moment a window
+/// rolls over, so a quiet afternoon does not spend rate-limit budget re-reading
+/// an unchanged number.
 final class RefreshScheduleTests: XCTestCase {
     private let idle: TimeInterval = 5 * 60
 
     @MainActor
-    func testBusyAlwaysPolls() {
-        XCTAssertTrue(UsageStore.shouldRefresh(isBusy: true, sinceLastAttempt: 0, idleInterval: idle))
-        XCTAssertTrue(UsageStore.shouldRefresh(isBusy: true, sinceLastAttempt: 60, idleInterval: idle))
-    }
-
-    @MainActor
     func testIdleWaitsOutTheLongerInterval() {
-        XCTAssertFalse(UsageStore.shouldRefresh(isBusy: false, sinceLastAttempt: 60, idleInterval: idle))
-        XCTAssertFalse(UsageStore.shouldRefresh(isBusy: false, sinceLastAttempt: 299, idleInterval: idle))
-        XCTAssertTrue(UsageStore.shouldRefresh(isBusy: false, sinceLastAttempt: 300, idleInterval: idle))
+        XCTAssertFalse(UsageStore.shouldRefresh(sinceLastAttempt: 60, idleInterval: idle))
+        XCTAssertFalse(UsageStore.shouldRefresh(sinceLastAttempt: 299, idleInterval: idle))
+        XCTAssertTrue(UsageStore.shouldRefresh(sinceLastAttempt: 300, idleInterval: idle))
     }
 
     /// A first run has never attempted anything and must not be held back.
     @MainActor
     func testTheFirstAttemptIsNeverDeferred() {
         XCTAssertTrue(UsageStore.shouldRefresh(
-            isBusy: false,
             sinceLastAttempt: .greatestFiniteMagnitude,
             idleInterval: idle
         ))
@@ -489,27 +461,11 @@ final class RefreshScheduleTests: XCTestCase {
     @MainActor
     func testARolledOverWindowPollsInsideTheIdleInterval() {
         XCTAssertTrue(UsageStore.shouldRefresh(
-            isBusy: false, sinceLastAttempt: 60, idleInterval: idle, resetDue: true
+            sinceLastAttempt: 60, idleInterval: idle, resetDue: true
         ))
         XCTAssertFalse(UsageStore.shouldRefresh(
-            isBusy: false, sinceLastAttempt: 60, idleInterval: idle, resetDue: false
+            sinceLastAttempt: 60, idleInterval: idle, resetDue: false
         ))
-    }
-
-    /// The tick is now four times a minute, so "busy" can no longer mean "fetch
-    /// on every tick" — that would be four fetches a minute at a provider that
-    /// answers a 429. Busy means the busy interval, and nothing shorter.
-    @MainActor
-    func testBusyPollsAtTheBusyIntervalRatherThanEveryTick() {
-        let busy: TimeInterval = 30
-        XCTAssertFalse(UsageStore.shouldRefresh(isBusy: true, sinceLastAttempt: 15,
-                                                idleInterval: idle, busyInterval: busy))
-        XCTAssertTrue(UsageStore.shouldRefresh(isBusy: true, sinceLastAttempt: 30,
-                                               idleInterval: idle, busyInterval: busy))
-        // And a reset still overrules the wait, busy or not.
-        XCTAssertTrue(UsageStore.shouldRefresh(isBusy: true, sinceLastAttempt: 1,
-                                               idleInterval: idle, busyInterval: busy,
-                                               resetDue: true))
     }
 
     /// Attention is not a budget: four rings hovered in four seconds is four
@@ -523,16 +479,15 @@ final class RefreshScheduleTests: XCTestCase {
     }
 
     /// The shipped numbers, held to the shape they claim rather than to
-    /// whatever they happen to be: a tick fine enough to express the busy
-    /// interval, a busy interval well inside the idle one, and a look spaced by
-    /// no more than the busy interval — a look that had to wait longer than the
-    /// schedule already does would be worse than not asking.
+    /// whatever they happen to be: a tick well inside the idle interval, so a
+    /// rollover is noticed promptly, and a look spaced by less than the idle
+    /// interval — a look that had to wait as long as the schedule already does
+    /// would be worse than not asking.
     @MainActor
     func testTheShippedScheduleHangsTogether() {
         let store = UsageStore(providers: [])
-        XCTAssertLessThanOrEqual(store.refreshIntervalForTesting, store.busyRefreshIntervalForTesting)
-        XCTAssertLessThan(store.busyRefreshIntervalForTesting, store.idleRefreshIntervalForTesting)
-        XCTAssertLessThanOrEqual(store.onLookIntervalForTesting, store.busyRefreshIntervalForTesting)
+        XCTAssertLessThan(store.refreshIntervalForTesting, store.idleRefreshIntervalForTesting)
+        XCTAssertLessThan(store.onLookIntervalForTesting, store.idleRefreshIntervalForTesting)
     }
 }
 
@@ -580,30 +535,16 @@ final class UsageFreshnessTests: XCTestCase {
         UsageStore(providers: [provider], archive: UsageArchive(defaults: makeDefaults()))
     }
 
-    /// Nothing is running, so nothing has moved, so a provider's own cache is
-    /// the best answer available — free, and not wrong about a still number.
+    /// A scheduled pass takes whatever the provider has cached — free, and the
+    /// cache is the provider's own business to keep honest.
     @MainActor
     func testAnIdleRefreshTakesWhateverTheProviderHasCached() async {
         let provider = RecordingProvider()
         let store = store(provider)
-        store.isBusy = { false }
 
         await store.refresh()
 
         XCTAssertEqual(provider.asked, [.standard])
-    }
-
-    /// Something is running, so the cached number is the one thing it cannot be:
-    /// current.
-    @MainActor
-    func testARefreshWhileBusyWillNotTakeACachedReading() async {
-        let provider = RecordingProvider()
-        let store = store(provider)
-        store.isBusy = { true }
-
-        await store.refresh()
-
-        XCTAssertEqual(provider.asked, [.live])
     }
 
     /// A look is the least excusable moment to answer from a cache, whether or
@@ -612,7 +553,6 @@ final class UsageFreshnessTests: XCTestCase {
     func testALookAsksForALiveReading() async {
         let provider = RecordingProvider()
         let store = store(provider)
-        store.isBusy = { false }
 
         store.refreshBecauseSomeoneIsLooking()
         await store.settleForTesting()
@@ -625,7 +565,6 @@ final class UsageFreshnessTests: XCTestCase {
     func testASecondLookInsideTheSpacingAsksForNothing() async {
         let provider = RecordingProvider()
         let store = store(provider)
-        store.isBusy = { false }
 
         store.refreshBecauseSomeoneIsLooking()
         await store.settleForTesting()
@@ -633,23 +572,6 @@ final class UsageFreshnessTests: XCTestCase {
         await store.settleForTesting()
 
         XCTAssertEqual(provider.asked.count, 1, "hovering twice cost two fetches")
-    }
-
-    /// Work stopping is the falling edge the idle schedule is about to sit on
-    /// for five minutes. It gets one fetch, and it is a live one.
-    @MainActor
-    func testWorkFinishingAsksForALiveReadingOnce() async {
-        let provider = RecordingProvider()
-        let store = store(provider)
-
-        store.refreshBecauseWorkFinished(providerID: provider.id)
-        await store.settleForTesting()
-        // A transcript-read session state legitimately flickers; the second edge
-        // inside the spacing must not cost a second fetch.
-        store.refreshBecauseWorkFinished(providerID: provider.id)
-        await store.settleForTesting()
-
-        XCTAssertEqual(provider.asked, [.live])
     }
 
     /// Refetching one provider is an event, not a schedule, so it asks for now.
@@ -683,7 +605,6 @@ final class UsageFreshnessTests: XCTestCase {
     func testTheSettingMakesALookAskTheSourceItself() async {
         let provider = RecordingProvider()
         let store = store(provider)
-        store.isBusy = { false }
         store.asksProviderOnLook = { true }
 
         store.refreshBecauseSomeoneIsLooking()
@@ -698,7 +619,6 @@ final class UsageFreshnessTests: XCTestCase {
     func testWithoutTheSettingALookStillAsksForALiveReading() async {
         let provider = RecordingProvider()
         let store = store(provider)
-        store.isBusy = { false }
 
         store.refreshBecauseSomeoneIsLooking()
         await store.settleForTesting()
@@ -707,19 +627,18 @@ final class UsageFreshnessTests: XCTestCase {
     }
 
     /// It reaches the look and nothing else. A setting that also applied to the
-    /// schedule would spend an uncached request every thirty seconds through a
-    /// long session, at a provider that answers a 429 — which is how asking for
-    /// fresher numbers ends up producing staler ones.
+    /// schedule would spend an uncached request on every pass, at a provider
+    /// that answers a 429 — which is how asking for fresher numbers ends up
+    /// producing staler ones.
     @MainActor
     func testTheSettingDoesNotReachTheSchedule() async {
         let provider = RecordingProvider()
         let store = store(provider)
-        store.isBusy = { true }
         store.asksProviderOnLook = { true }
 
         await store.refresh()
 
-        XCTAssertEqual(provider.asked, [.live])
+        XCTAssertEqual(provider.asked, [.standard])
     }
 
     /// The switch is off until somebody turns it on, and stays where it is put.

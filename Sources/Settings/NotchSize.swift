@@ -2,8 +2,7 @@ import Foundation
 
 /// How large the notch is drawn.
 ///
-/// A fixed set rather than a free number, for the same reason `PeekDuration` is
-/// one: the useful range is narrow. Below about three quarters the percentage
+/// A fixed set rather than a free number: the useful range is narrow. Below about three quarters the percentage
 /// under each ring stops being readable at a glance, which is the one thing the
 /// notch exists to do; much above a quarter larger and a stack of five
 /// providers is competing with the windows it sits beside rather than reporting

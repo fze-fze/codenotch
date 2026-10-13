@@ -7,17 +7,11 @@ final class NotchViewModel: ObservableObject {
 
     func updateSnapshots(_ providerSnapshots: [ProviderSnapshot]) {
         let hoveredID = hoveredSnapshot?.id
-        let next = providerSnapshots.map(Costs.decorate)
+        let next = providerSnapshots
         let nextHoveredIndex = hoveredID.flatMap { id in next.firstIndex { $0.id == id } }
         if hoveredIndex != nextHoveredIndex { hoveredIndex = nextHoveredIndex }
         snapshots = next
     }
-
-    /// Live agent sessions, keyed by the provider they belong to. They surface
-    /// inside that provider's own ring rather than as a cell of their own — one
-    /// ring per provider, so nothing in the notch looks like a ring without
-    /// being one.
-    @Published var sessions: [String: [AgentSession]] = [:]
 
     /// Which cell the cursor is over, if any. Driven from the window controller
     /// rather than SwiftUI's `.onHover`: the panel ignores mouse events until
@@ -96,9 +90,6 @@ final class NotchViewModel: ObservableObject {
     var onUpdateChoice: ((UpdateChoice) -> Void)?
     /// A newer version waiting, put off — the red dot on the settings button.
     @Published var updatePending = false
-    /// A tap on a session row in the tooltip: jump to the terminal tab the
-    /// session runs in. Takes the session's pid; wired to `SessionFocus`.
-    var onFocusSession: ((pid_t) -> Void)?
     /// Which screen edge the notch is welded to. Everything geometric reads
     /// this through `placement` rather than assuming an axis.
     @Published var edge: NotchEdge = .right
@@ -155,9 +146,8 @@ final class NotchViewModel: ObservableObject {
 
     /// How much screen there is to spend on the panel.
     ///
-    /// The tooltip's budget comes out of this: how many sessions a card can
-    /// list before the panel holding it would run off the display. Zero until
-    /// the controller says otherwise, which reads as "no screen known yet".
+    /// Zero until the controller says otherwise, which reads as "no screen
+    /// known yet".
     @Published var screenSize: CGSize = .zero
 
     /// Visible slice of the panel along its edge, in local stack coordinates.
@@ -1083,26 +1073,14 @@ final class NotchViewModel: ObservableObject {
         guard edge.isVertical, screenSize.height > 0, cellCount > 1 else {
             return NotchLayout.cellSpacing
         }
-        // Extra model cells spend the gaps first. Reserve the cards actually
-        // present; assuming four quota windows for every local model overflows laptops.
+        // Reserve the cards actually present, not four windows for everyone.
         let slack = NotchLayout.slack(for: edge,
-            maxCardHeight: snapshots.isEmpty ? NotchLayout.maxCardHeight(sessionCap: 0)
-                : contentCardHeight(sessionCap: 0),
+            maxCardHeight: snapshots.isEmpty ? NotchLayout.maxCardHeight() : contentCardHeight,
             notchScale: sizeScale)
         let packed = NotchLayout.shapeLength(cellCount: cellCount, edge: edge,
                                              flare: flare, spacing: 0)
         return min(NotchLayout.cellSpacing,
                    max(0, ((screenSize.height - 2 * slack) / sizeScale - packed) / CGFloat(cellCount - 1)))
-    }
-
-    /// A provider with no activity source gets none, rather than borrowing
-    /// somebody else's.
-    func activity(for snapshot: ProviderSnapshot) -> ActivitySummary? {
-        activity(for: snapshot.id)
-    }
-
-    func activity(for providerID: String) -> ActivitySummary? {
-        ActivitySummary(sessions: sessions[providerID] ?? [])
     }
 
     var hoveredSnapshot: ProviderSnapshot? {
@@ -1159,14 +1137,6 @@ final class NotchViewModel: ObservableObject {
                           notchScale: sizeScale)
     }
 
-    /// How many sessions a tooltip may list here before it has to summarise
-    /// the rest — as many as this screen has room for.
-    var sessionCap: Int { sessionCap(cellCount: snapshots.count) }
-
-    private var hasTokenUsage: Bool {
-        snapshots.contains { $0.tokenUsage != nil }
-    }
-
     private var hasPlan: Bool {
         snapshots.contains { $0.plan != nil }
     }
@@ -1175,68 +1145,23 @@ final class NotchViewModel: ObservableObject {
         snapshots.contains(where: \.hasAvailableResetCredits)
     }
 
-    func sessionCap(cellCount: Int) -> Int {
-        guard screenSize != .zero else { return NotchLayout.defaultSessionCap }
-        return NotchLayout.sessionsFitting(cardBudget: cardBudget(cellCount: cellCount),
-                                           windowCount: NotchLayout.maxWindowCount,
-                                           hasTokenUsage: hasTokenUsage,
-                                           hasPlan: hasPlan,
-                                           hasResetCredits: hasResetCredits)
-    }
-
-    /// Project rows a card may list: the ones the cost model has, capped at
-    /// what the section draws.
-    func costRows(for snapshot: ProviderSnapshot) -> Int {
-        CostSection.rowCount(for: snapshot)
-    }
-
-    private func contentCardHeight(sessionCap: Int) -> CGFloat {
+    private var contentCardHeight: CGFloat {
         snapshots.map { snapshot in
             NotchLayout.cardHeight(windowCount: snapshot.windows.count,
                 groupCount: snapshot.windowGroupCount, leadsWithGroup: snapshot.leadsWithGroup,
                 moneyWindowCount: snapshot.windows.filter { $0.money != nil }.count,
-                sessionCount: sessionCap + 1,
-                sessionCap: sessionCap,
                 statusMessage: snapshot.statusMessage,
                 blockMessage: snapshot.block?.summary(now: now),
-                hasTokenUsage: snapshot.tokenUsage != nil,
                 hasPlan: snapshot.plan != nil,
                 hasResetCredits: snapshot.hasAvailableResetCredits,
-                compactRowCount: snapshot.compactRowCount,
-                costRows: costRows(for: snapshot))
+                compactRowCount: snapshot.compactRowCount)
         }.max() ?? 0
     }
 
     func maxCardHeight(cellCount: Int) -> CGFloat {
-        let cap = sessionCap(cellCount: cellCount)
-        return snapshots.isEmpty
-            ? NotchLayout.maxCardHeight(sessionCap: cap, hasTokenUsage: hasTokenUsage, hasPlan: hasPlan,
-                                        hasResetCredits: hasResetCredits)
-            : contentCardHeight(sessionCap: cap)
-    }
-
-    /// How tall the tallest card may be before the panel runs off the screen.
-    ///
-    /// Which way it runs out differs by orientation, because the card's height
-    /// is spent on a different axis: along a side edge it is spent *along* the
-    /// stack, half of it past each end, so the stack itself takes its share
-    /// first. Along a horizontal edge the card hangs *inward* instead, and what
-    /// it competes with is the depth already spent on the notch body and tail.
-    /// The screen is measured in real points, and everything it is compared
-    /// against here is unscaled. Dividing brings the screen into the same space
-    /// rather than scaling the four constants below it: at `large` a card sized
-    /// against the raw height would be drawn a quarter taller than it was
-    /// budgeted for, and run off the bottom of a small display.
-    private func cardBudget(cellCount: Int) -> CGFloat {
-        if edge.isVertical {
-            return screenSize.height / sizeScale
-                - shapeLength(cellCount: cellCount)
-                - 2 * NotchLayout.cardCorner
-        }
-        return screenSize.height / sizeScale
-            - NotchLayout.bodyDepth(for: edge)
-            - NotchLayout.tailLength
-            - NotchLayout.tailGap
+        snapshots.isEmpty
+            ? NotchLayout.maxCardHeight(hasPlan: hasPlan, hasResetCredits: hasResetCredits)
+            : contentCardHeight
     }
 
     /// The drawn extent of the notch body right now, along the stack.

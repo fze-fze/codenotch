@@ -28,10 +28,6 @@ final class NotchFleet {
 
     private var snapshots: [ProviderSnapshot] = []
     private var refreshing: Set<String> = []
-    /// Exposed read-only rather than private: completion-watching needs the
-    /// merged dict after a fan-out, the same way it read `controller.model
-    /// .sessions` before there was more than one controller.
-    private(set) var sessions: [String: [AgentSession]] = [:]
     /// Which display a single, unassigned controller should sit on. Only
     /// consulted by `.mainDisplay` — every controller under `.allDisplays`
     /// already has its own `assignedScreen`, which wins over this in
@@ -87,7 +83,6 @@ final class NotchFleet {
             controller.apply(updatePrompt: updatePrompt)
         }
     }
-    var onFocusSession: ((pid_t) -> Void)?
     /// An ⌥-drag on any one panel settled at a new offset. Persisting it is
     /// Preferences' job, same division `apply(edge:)` already keeps.
     var onReposition: ((CGFloat) -> Void)?
@@ -274,9 +269,9 @@ final class NotchFleet {
     /// Opens every panel for a moment, because something happened — the same
     /// announcement on every display rather than only the one you happen to
     /// be looking at.
-    func peek(for duration: TimeInterval, focusing pid: pid_t?) {
+    func peek(for duration: TimeInterval) {
         for controller in controllers.values {
-            controller.peek(for: duration, focusing: pid)
+            controller.peek(for: duration)
         }
     }
 
@@ -296,19 +291,6 @@ final class NotchFleet {
         self.refreshing = ids
         for controller in controllers.values {
             controller.model.refreshing = ids
-        }
-    }
-
-    func setSessions(providerID id: String, sessions live: [AgentSession]) {
-        sessions[id] = live
-        let now = Date()
-        menuModel.sessions[id] = live
-        menuModel.now = now
-        for controller in controllers.values {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                controller.model.sessions[id] = live
-            }
-            controller.model.now = now
         }
     }
 
@@ -417,7 +399,6 @@ final class NotchFleet {
         controller.onRefreshProvider = onRefreshProvider
         controller.onOpenSettings = onOpenSettings
         controller.model.onOpenSettings = onOpenSettings
-        controller.model.onFocusSession = onFocusSession
         controller.model.onUpdateChoice = { [weak self] in self?.onUpdateChoice?($0) }
         controller.apply(updatePrompt: updatePrompt)
         controller.model.updatePending = updatePending
@@ -425,7 +406,6 @@ final class NotchFleet {
         controller.onMoveToEdge = onMoveToEdge
         controller.model.updateSnapshots(snapshots)
         controller.model.refreshing = refreshing
-        controller.model.sessions = sessions
         controller.model.now = Date()
         controller.apply(visibility)
         controller.show()

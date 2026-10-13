@@ -4,17 +4,6 @@ import XCTest
 
 @MainActor
 final class AccessibilityTransparencyTests: XCTestCase {
-    private func session(_ name: String, _ state: AgentSession.State) -> AgentSession {
-        AgentSession(
-            id: name,
-            name: name,
-            detail: "Terminal · test",
-            state: state,
-            waitingFor: state == .waiting ? "your answer" : nil,
-            since: Date()
-        )
-    }
-
     func testEnvironmentValueCanBeOverridden() {
         var values = EnvironmentValues()
         XCTAssertFalse(values.codenotchReduceTransparency)
@@ -46,8 +35,7 @@ final class AccessibilityTransparencyTests: XCTestCase {
             usedFraction: 1.0,
             glyph: .grok,
             isStale: true,
-            isBlocked: true,
-            activity: ActivitySummary(sessions: [session("s1", .waiting)])
+            isBlocked: true
         )
         .environment(\.codenotchReduceTransparency, true)
         .frame(width: NotchLayout.ringDiameter, height: NotchLayout.ringDiameter)
@@ -68,27 +56,21 @@ final class AccessibilityTransparencyTests: XCTestCase {
             status: .ok,
             windows: [LimitWindow(id: "session", label: "Session", usedFraction: 0.6)]
         )
-        let activity = ActivitySummary(sessions: [
-            session("session-1", .busy),
-            session("session-2", .idle)
-        ])
 
-        let standardCard = TooltipCard(snapshot: snapshot, activity: activity, now: Date())
+        let standardCard = TooltipCard(snapshot: snapshot, now: Date())
             .environment(\.codenotchReduceTransparency, false)
             .padding(10)
 
-        let reducedCard = TooltipCard(snapshot: snapshot, activity: activity, now: Date())
+        let reducedCard = TooltipCard(snapshot: snapshot, now: Date())
             .environment(\.codenotchReduceTransparency, true)
             .padding(10)
 
-        let standardRenderer = ImageRenderer(content: standardCard)
-        let reducedRenderer = ImageRenderer(content: reducedCard)
+        let standardImage = try XCTUnwrap(ImageRenderer(content: standardCard).nsImage)
+        let reducedImage = try XCTUnwrap(ImageRenderer(content: reducedCard).nsImage)
 
-        let standardImage = try XCTUnwrap(standardRenderer.nsImage)
-        let reducedImage = try XCTUnwrap(reducedRenderer.nsImage)
-
-        XCTAssertGreaterThan(standardImage.size.height, NotchLayout.cardWidth * 0.4)
-        XCTAssertGreaterThan(reducedImage.size.height, NotchLayout.cardWidth * 0.4)
+        XCTAssertGreaterThan(standardImage.size.height, 0)
+        XCTAssertEqual(reducedImage.size, standardImage.size,
+                       "reduced transparency changes the material, not the card's size")
     }
 
     func testSettingsViewRendersUnderReducedTransparency() throws {

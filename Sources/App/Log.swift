@@ -6,5 +6,4 @@ import os
 ///     log stream --predicate 'subsystem == "com.vinz.codenotch"' --level debug
 enum Log {
     static let usage = Logger(subsystem: "com.vinz.codenotch", category: "usage")
-    static let sessions = Logger(subsystem: "com.vinz.codenotch", category: "sessions")
 }

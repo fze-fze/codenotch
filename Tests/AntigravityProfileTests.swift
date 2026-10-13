@@ -155,19 +155,6 @@ final class AntigravityProfileTests: XCTestCase {
 
     // MARK: - Activity Monitor Roots
 
-    @MainActor
-    func testActivityMonitorRoots() {
-        let defaultProfile = AntigravityProfile.default(home: URL(fileURLWithPath: "/Users/test"))
-        let workProfile = AntigravityProfile(slug: "work",
-                                             configDirectory: URL(fileURLWithPath: "/Users/test/.gemini/antigravity-work"))
-
-        let defaultMonitor = AntigravityActivityMonitor(profile: defaultProfile)
-        XCTAssertNotNil(defaultMonitor)
-
-        let workMonitor = AntigravityActivityMonitor(profile: workProfile)
-        XCTAssertNotNil(workMonitor)
-    }
-
     // MARK: - Account Details and Isolation
 
     func testAccountResolutionFromOAuthCreds() throws {

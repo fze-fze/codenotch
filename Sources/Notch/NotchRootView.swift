@@ -156,14 +156,10 @@ struct NotchRootView: View {
                    model.isExpanded {
                     TooltipCard(
                         snapshot: snapshot,
-                        activity: model.activity(for: snapshot),
                         now: model.now,
                         direction: model.edge.tooltipDirection,
-                        sessionCap: model.sessionCap,
-                        costRows: model.costRows(for: snapshot),
                         resetTimeFormat: model.resetTimeFormat,
                         tailOffset: tooltipTailOffset(index: index, snapshot: snapshot),
-                        onFocusSession: model.onFocusSession
                     )
                         // Deliberately *no* `.id` here: the card is one object
                         // that travels and resizes between cells, which reads
@@ -446,7 +442,6 @@ struct NotchRootView: View {
         let stack = ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
             ProviderCell(
                 snapshot: snapshot,
-                activity: model.activity(for: snapshot),
                 isRefreshing: model.isRefreshing(snapshot),
                 weeklyRing: model.weeklyRing,
                 showsWeeklyReading: model.weeklyReading,
@@ -581,15 +576,11 @@ struct NotchRootView: View {
             windowCount: snapshot.windows.count,
             groupCount: snapshot.windowGroupCount, leadsWithGroup: snapshot.leadsWithGroup,
             moneyWindowCount: snapshot.windows.filter { $0.money != nil }.count,
-            sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
-            sessionCap: model.sessionCap,
             statusMessage: snapshot.statusMessage,
             blockMessage: snapshot.block?.summary(now: model.now),
-            hasTokenUsage: snapshot.tokenUsage != nil,
             hasPlan: snapshot.plan != nil,
             hasResetCredits: snapshot.hasAvailableResetCredits,
-            compactRowCount: snapshot.compactRowCount,
-            costRows: model.costRows(for: snapshot))
+            compactRowCount: snapshot.compactRowCount)
     }
 
     private func tooltipTailOffset(index: Int, snapshot: ProviderSnapshot) -> CGFloat {
