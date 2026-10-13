@@ -641,8 +641,10 @@ private struct ProviderTooltip: View {
 
                                 VStack(alignment: .leading, spacing: NotchLayout.blockSpacing) {
                                     ForEach(Array(group.windows.enumerated()), id: \.element.id) { windowIndex, window in
+                                        // The stack's own spacing is the gap; a top padding
+                                        // here as well drew every gap twice, past the height
+                                        // `NotchLayout.cardHeight` reserves for it.
                                         LimitWindowRow(window: window, inset: 2 * Design.px(16), fidelity: snapshot.fidelity, now: now, resetTimeFormat: resetTimeFormat, showsUsagePace: showUsagePace)
-                                            .padding(.top, windowIndex == 0 ? 0 : NotchLayout.blockSpacing)
                                     }
                                 }
                                 .padding(Design.px(16))
@@ -1055,7 +1057,7 @@ struct TooltipCard: View {
     private var height: CGFloat {
         NotchLayout.cardHeight(
             windowCount: snapshot.windows.count,
-            groupCount: snapshot.windowGroupCount,
+            groupCount: snapshot.windowGroupCount, leadsWithGroup: snapshot.leadsWithGroup,
             moneyWindowCount: snapshot.windows.filter { $0.money != nil }.count,
             sessionCount: activity?.sessions.count ?? 0,
             sessionCap: sessionCap,

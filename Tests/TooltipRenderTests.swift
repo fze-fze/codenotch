@@ -110,6 +110,49 @@ final class TooltipRenderTests: XCTestCase {
         }
     }
 
+    /// The Grok card: the pool on top, then the products under a titled
+    /// group. A titled group after plain rows sits further down, and a card
+    /// whose height left that out cut the last product off.
+    func testGrokBreakdownFitsTheCard() throws {
+        let credits = """
+        {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY",\
+        "start":"2026-10-13T04:35:13.277+00:00","end":"2026-10-20T04:35:13.277+00:00"},\
+        "creditUsagePercent":14.0,"productUsage":[{"usagePercent":6.0},\
+        {"product":"GrokVoice","usagePercent":4.0},{"product":"GrokBuild","usagePercent":2.0},\
+        {"product":"GrokBot","usagePercent":1.0},{"product":"GrokChat","usagePercent":1.0}],\
+        "isUnifiedBillingUser":true}}
+        """
+        var snapshot = ProviderSnapshot(
+            id: "grok", displayName: "Grok", glyph: .grok, fidelity: .official, status: .ok,
+            windows: try GrokUsage.windows(creditsJSON: credits), headlineID: "credits"
+        )
+        snapshot.plan = "SuperGrok"
+        XCTAssertFalse(snapshot.leadsWithGroup)
+
+        let fitted = NotchLayout.cardHeight(
+            windowCount: snapshot.windows.count, groupCount: snapshot.windowGroupCount,
+            leadsWithGroup: snapshot.leadsWithGroup, hasPlan: true,
+            compactRowCount: snapshot.compactRowCount)
+        let wronglyLed = NotchLayout.cardHeight(
+            windowCount: snapshot.windows.count, groupCount: snapshot.windowGroupCount,
+            leadsWithGroup: true, hasPlan: true, compactRowCount: snapshot.compactRowCount)
+        XCTAssertEqual(fitted - wronglyLed, Design.px(28) - NotchLayout.blockSpacing, accuracy: 0.001,
+                       "a group after the pool's row is the wider gap below it")
+
+        let view = TooltipCard(snapshot: snapshot, now: Date(timeIntervalSince1970: 1_791_878_400))
+            .padding(20)
+            .background(Color.black)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        let image = try XCTUnwrap(renderer.nsImage)
+        if let path = ProcessInfo.processInfo.environment["TOOLTIP_RENDER_PATH"] {
+            let tiff = try XCTUnwrap(image.tiffRepresentation)
+            let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?
+                .representation(using: .png, properties: [:]))
+            try png.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
     func testCodexCardRendersAccountActivity() throws {
         let usage = CodexTokenUsage(
             summary: .init(lifetimeTokens: 280_000, peakDailyTokens: 150_000,

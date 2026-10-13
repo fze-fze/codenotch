@@ -354,7 +354,7 @@ enum NotchLayout {
     /// The tooltip's height for a given number of limit windows and live
     /// sessions. Worked out here rather than left to SwiftUI so the hover region
     /// can be computed before the card is ever laid out.
-    static func cardHeight(windowCount: Int, groupCount: Int = 0,
+    static func cardHeight(windowCount: Int, groupCount: Int = 0, leadsWithGroup: Bool = true,
                            moneyWindowCount: Int = 0,
                            sessionCount: Int = 0,
                            sessionCap: Int = defaultSessionCap,
@@ -394,10 +394,12 @@ enum NotchLayout {
                 let groupExtra = cardBodyLineHeight + Design.px(12) + 2 * Design.px(16)
                 height += CGFloat(groupCount) * groupExtra
 
-                if groupCount > 1 {
-                    // We use 28px between groups instead of the default 20px (blockSpacing)
-                    height += CGFloat(groupCount - 1) * (Design.px(28) - blockSpacing)
-                }
+                // A titled group sits 28px below whatever comes before it,
+                // instead of the default 20px (blockSpacing). The first block
+                // sits `headerToBlock` under the header either way, so only a
+                // group that follows other rows takes the wider gap.
+                let widenedGaps = leadsWithGroup ? groupCount - 1 : groupCount
+                height += CGFloat(widenedGaps) * (Design.px(28) - blockSpacing)
 
                 // Extra padding at the very bottom
                 height += Design.px(8)

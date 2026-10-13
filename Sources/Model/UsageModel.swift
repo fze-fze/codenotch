@@ -406,6 +406,10 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// Group headings occupy space in both the card and its hover region.
     var windowGroupCount: Int { Set(windows.compactMap(\.group)).count }
 
+    /// Whether the card opens on a titled group rather than on plain rows —
+    /// the two sit a different distance below what precedes them.
+    var leadsWithGroup: Bool { windows.first?.group != nil }
+
     /// How many windows are count-only (no fraction, no bar) — they render as
     /// single-line rows and take less vertical space than full bar rows.
     var compactRowCount: Int {
