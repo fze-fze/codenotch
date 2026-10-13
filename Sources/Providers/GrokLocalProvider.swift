@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// Reads Grok Build usage from the same billing endpoint the CLI's `/usage` uses.
+/// Reads included usage from the same billing endpoint the CLI's `/usage` uses.
 ///
 /// The credential is Grok's own `~/.grok/auth.json` session. Its access token
 /// lasts six hours and the CLI renews it only while it runs, which on a Mac
@@ -12,8 +12,12 @@ import os
 /// written, so there is nothing to race the CLI for. That is safe because
 /// `auth.x.ai` issues a new refresh token on every renewal but does not revoke
 /// the old one — the CLI's copy in the file keeps working after ours is used.
-/// Credits (`?format=credits`) is the weekly Grok Build allowance, and the only
-/// number this endpoint actually states.
+/// Credits (`?format=credits`) is the included pool. On The X Subscription
+/// that pool is shared by Grok, Grok Bot and Cursor; `creditUsagePercent` is
+/// the whole of it, and Cursor's own usage summary is not added on top. The
+/// cycle is whatever `currentPeriod` says. An account that has not moved onto
+/// that pool still reports a Grok Build allowance, which is the only number
+/// this endpoint then states.
 actor GrokLocalProvider: UsageProvider {
     nonisolated let id = "grok"
     nonisolated let displayName = "Grok"

@@ -1,9 +1,9 @@
 import XCTest
 @testable import Codenotch
 
-/// Pinned to a response recorded from a live SuperGrok CLI session. Credits
-/// is the weekly Grok Build allowance — the one number this account's own
-/// endpoint actually states.
+/// Pinned to a response recorded from a live SuperGrok CLI session. On the
+/// unified bill, `creditUsagePercent` is the included pool shared by Grok,
+/// Grok Bot and Cursor — not a Grok Build allowance of its own.
 final class GrokUsageTests: XCTestCase {
     private let credits = """
     {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY",\
@@ -25,8 +25,9 @@ final class GrokUsageTests: XCTestCase {
     func testTheRingIsTheCreditsPercentage() throws {
         let credits = try XCTUnwrap(windows().first { $0.id == "credits" })
         XCTAssertEqual(credits.duration, 7 * 86400)
-        XCTAssertEqual(credits.label, "Grok Build")
+        XCTAssertEqual(credits.label, "Weekly limit")
         XCTAssertEqual(credits.usedFraction ?? -1, 0.08, accuracy: 0.0001)
+        XCTAssertEqual(try windows().map(\.id), ["credits"])
     }
 
     func testWeeklyCreditsHaveTheirOwnReset() throws {
@@ -101,6 +102,68 @@ final class GrokUsageTests: XCTestCase {
                 return XCTFail("expected badResponse, got \(error)")
             }
         }
+    }
+
+    /// The same percent covers Grok, Grok Bot and Cursor. Their rows are a
+    /// breakdown of that one pool, so the card stays a single limit window.
+    func testTheSharedPoolIsOneWindow() throws {
+        let shared = """
+        {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY",\
+        "start":"2026-10-01T00:00:00+00:00",\
+        "end":"2026-11-01T00:00:00+00:00"},\
+        "creditUsagePercent":12.0,"isUnifiedBillingUser":true,\
+        "productUsage":[{"product":"Grok","usagePercent":4.0},\
+        {"product":"GrokBot","usagePercent":5.0},\
+        {"product":"Cursor","usagePercent":3.0}]}}
+        """
+        let w = try GrokUsage.windows(creditsJSON: shared)
+        XCTAssertEqual(w.map(\.id), ["credits"])
+        XCTAssertEqual(w[0].label, "Monthly limit")
+        XCTAssertEqual(w[0].usedFraction ?? -1, 0.12, accuracy: 0.0001)
+        XCTAssertEqual(w[0].duration, 31 * 86400)
+    }
+
+    /// A fresh monthly cycle states the window and no percent yet. That is 0%
+    /// of the shared pool, not an account with nothing to meter.
+    func testAFreshMonthlyPoolReadsAsZero() throws {
+        let monthly = """
+        {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY",\
+        "start":"2026-10-01T00:00:00+00:00",\
+        "end":"2026-11-01T00:00:00+00:00"}}}
+        """
+        let w = try GrokUsage.windows(creditsJSON: monthly)
+        let credits = try XCTUnwrap(w.first { $0.id == "credits" })
+        XCTAssertEqual(w.count, 1)
+        XCTAssertEqual(credits.label, "Monthly limit")
+        XCTAssertEqual(credits.usedFraction ?? -1, 0, accuracy: 0.0001)
+    }
+
+    /// The combined percent can be omitted and left on the only product row.
+    /// On the shared pool that row is still the pool, not a Grok Build quota.
+    func testAUnifiedProductPercentIsThePool() throws {
+        let onlyProduct = """
+        {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY",\
+        "end":"2026-09-12T08:21:18+00:00"},\
+        "isUnifiedBillingUser":true,\
+        "productUsage":[{"product":"GrokBuild","usagePercent":33.0}]}}
+        """
+        let w = try GrokUsage.windows(creditsJSON: onlyProduct)
+        XCTAssertEqual(w.map(\.id), ["credits"])
+        XCTAssertEqual(w[0].label, "Weekly limit")
+        XCTAssertEqual(w[0].usedFraction ?? -1, 0.33, accuracy: 0.0001)
+    }
+
+    /// Before the shared pool, the credits percent is the Grok Build allowance
+    /// and keeps that name.
+    func testALegacyBuildAllowanceKeepsItsProductName() throws {
+        let legacy = """
+        {"config":{"creditUsagePercent":8.0,\
+        "productUsage":[{"product":"GrokBuild","usagePercent":8.0}],\
+        "billingPeriodEnd":"2026-09-12T08:21:18.802818+00:00"}}
+        """
+        let w = try GrokUsage.windows(creditsJSON: legacy)
+        XCTAssertEqual(w.map(\.label), ["Grok Build"])
+        XCTAssertEqual(w[0].usedFraction ?? -1, 0.08, accuracy: 0.0001)
     }
 
     func testHumanizesTheProductNameTheWayTheModalWritesIt() {
