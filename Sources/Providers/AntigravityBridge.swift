@@ -185,16 +185,17 @@ enum AntigravityBridge {
         return nil
     }
 
-    /// `userTier.name` is the subscription as Google sells it ("Google AI
-    /// Pro"); `planStatus.planInfo.planName` is the short form ("Pro") the
-    /// server falls back to.
+    /// `planStatus.planInfo.planName` is the short form ("Pro"). Every
+    /// subscription's full name (`userTier.name`, "Google AI Pro") carries the
+    /// same "Google AI" in front, which says nothing on a card that already
+    /// names Antigravity — so it is only the fallback.
     static func planName(inUserStatus data: Data) -> String? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let status = root["userStatus"] as? [String: Any]
         else { return nil }
         let tier = (status["userTier"] as? [String: Any])?["name"] as? String
         let plan = ((status["planStatus"] as? [String: Any])?["planInfo"] as? [String: Any])?["planName"] as? String
-        return tier?.nonEmptyPlan ?? plan?.nonEmptyPlan
+        return plan?.nonEmptyPlan ?? tier?.nonEmptyPlan
     }
 
     /// Turns the quota summary into limit windows.

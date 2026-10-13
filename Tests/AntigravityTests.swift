@@ -572,17 +572,17 @@ final class AntigravityCountSnapshotTests: XCTestCase {
 /// itself uses.
 final class AntigravityBridgeTests: XCTestCase {
     /// Trimmed from a live `GetUserStatus` on a Google AI Pro account. The
-    /// subscription's own name wins over the short plan name beside it.
-    func testThePlanNameComesFromTheUserTier() {
+    /// short plan name wins; the full subscription name is the fallback.
+    func testThePlanNameIsTheShortForm() {
         let status = """
         {"userStatus":{"name":"Someone","planStatus":{"planInfo":{"teamsTier":"TEAMS_TIER_PRO",\
         "planName":"Pro"}},"userTier":{"name":"Google AI Pro",\
         "upgradeSubscriptionUri":"https://antigravity.google/g1-upgrade"}}}
         """
-        XCTAssertEqual(AntigravityBridge.planName(inUserStatus: Data(status.utf8)), "Google AI Pro")
+        XCTAssertEqual(AntigravityBridge.planName(inUserStatus: Data(status.utf8)), "Pro")
 
-        let planOnly = #"{"userStatus":{"planStatus":{"planInfo":{"planName":"Pro"}}}}"#
-        XCTAssertEqual(AntigravityBridge.planName(inUserStatus: Data(planOnly.utf8)), "Pro")
+        let tierOnly = #"{"userStatus":{"userTier":{"name":"Google AI Pro"}}}"#
+        XCTAssertEqual(AntigravityBridge.planName(inUserStatus: Data(tierOnly.utf8)), "Google AI Pro")
         XCTAssertNil(AntigravityBridge.planName(inUserStatus: Data(#"{"userStatus":{}}"#.utf8)))
         XCTAssertNil(AntigravityBridge.planName(inUserStatus: Data("nope".utf8)))
     }
