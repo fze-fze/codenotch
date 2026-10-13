@@ -7,8 +7,8 @@
 //!      about six hours and only a running CLI renews it, so on a machine where grok is seldom run
 //!      the file goes stale and the endpoint rejects it. Shortly before expiry Codenotch therefore
 //!      runs `grok models` once, windowless (see "Token renewal"): the CLI renews the token from
-//!      its refresh token as it starts and rewrites the file itself, and listing models spends no
-//!      Grok Build allowance.
+//!      its refresh token as it starts and rewrites the file itself, and listing models spends none
+//!      of the included pool.
 //!      The file is an object keyed by `<issuer>::<client_id>`; each entry carries `key` (the
 //!      bearer token), `expires_at` and `email`.
 //!   2. Endpoint: `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`
@@ -20,9 +20,12 @@
 //!                    "productUsage": [{ "product": "GrokBuild", "usagePercent": 8.0 }],
 //!                    "billingPeriodStart": …, "billingPeriodEnd": … } }
 //!      ```
-//!      The credits payload is the ring: a weekly Grok Build allowance, and the only number this
-//!      endpoint actually states. Grok's own charge date is not in it — `billingPeriodEnd` is a
-//!      calendar-month usage ledger, not a bill — so none is shown rather than guessed at.
+//!      The credits payload is the ring. On The X Subscription, Grok, Grok Bot and Cursor share one
+//!      included pool and `creditUsagePercent` is how full that pool is; `productUsage` is a
+//!      breakdown of the same pool, not another window. The cycle is `currentPeriod`: weekly on the
+//!      published plan, monthly when the endpoint says so. `billingPeriodEnd` with no `currentPeriod`
+//!      is a usage ledger, not a cycle, so it is not shown as one. An account that has not moved onto
+//!      the shared pool still reports a Grok Build allowance, and that is the window.
 //!
 //! Only a session minted by xAI itself is used. The file can also hold a customer IdP's token,
 //! meant for that customer's private proxy; sending it to the public `cli-chat-proxy.grok.com`
@@ -283,6 +286,66 @@ pub fn humanize(name: &str) -> String {
     out
 }
 
+/// "WEEKLY" / "MONTHLY" / "" from `currentPeriod.type`. A missing period is not
+/// inferred from `billingPeriodEnd`: that field is a usage ledger, not a cycle.
+fn period_kind(config: &serde_json::Value) -> &'static str {
+    let kind = config
+        .get("currentPeriod")
+        .and_then(|p| p.get("type"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    if kind.contains("MONTH") {
+        "monthly"
+    } else if kind.contains("WEEK") {
+        "weekly"
+    } else {
+        ""
+    }
+}
+
+fn pool_label(kind: &str) -> String {
+    match kind {
+        "monthly" => "Monthly limit".into(),
+        "weekly" => "Weekly limit".into(),
+        _ => "Included usage".into(),
+    }
+}
+
+/// The X Subscription pool, a monthly cycle, or a breakdown across more than one
+/// surface. A single Grok Build row on an account that has not moved is still
+/// that product's own allowance.
+fn is_shared_pool(config: &serde_json::Value, kind: &str) -> bool {
+    if config.get("isUnifiedBillingUser").and_then(|x| x.as_bool()) == Some(true) {
+        return true;
+    }
+    if kind == "monthly" {
+        return true;
+    }
+    config.get("productUsage").and_then(|x| x.as_array()).map(|rows| rows.len() > 1).unwrap_or(false)
+}
+
+fn has_product_percent(config: &serde_json::Value) -> bool {
+    config
+        .get("productUsage")
+        .and_then(|x| x.as_array())
+        .map(|rows| rows.iter().any(|row| pct(row.get("usagePercent")).is_some()))
+        .unwrap_or(false)
+}
+
+/// The pool's own percent. One product row can stand in for it; several rows
+/// without `creditUsagePercent` are a breakdown of a number that was not stated,
+/// and are not added together.
+fn pool_percent(config: &serde_json::Value) -> Option<f64> {
+    if let Some(used) = pct(config.get("creditUsagePercent")) {
+        return Some(used);
+    }
+    let rows = config.get("productUsage").and_then(|x| x.as_array())?;
+    if rows.len() != 1 {
+        return None;
+    }
+    pct(rows[0].get("usagePercent"))
+}
+
 /// credits → (windows, note). An empty list with a note means the account has nothing metered.
 pub fn parse_credits(v: &serde_json::Value) -> (Vec<LimitWindow>, String) {
     let Some(config) = v.get("config") else {
@@ -291,6 +354,27 @@ pub fn parse_credits(v: &serde_json::Value) -> (Vec<LimitWindow>, String) {
     let current = config.get("currentPeriod");
     let current_end = iso_ms(current.and_then(|p| p.get("end")));
     let resets_at = current_end.or_else(|| iso_ms(config.get("billingPeriodEnd")));
+    let kind = period_kind(config);
+
+    // One included pool, drawn as the same single limit window the other providers use.
+    // Product rows are who spent it, not extra quotas. Several of those rows without a
+    // combined percent are not wiped out with 0 %.
+    if is_shared_pool(config, kind) {
+        let stated = pool_percent(config);
+        let fresh = stated.is_none() && !has_product_percent(config) && (kind == "weekly" || kind == "monthly");
+        if let Some(used) = stated.or(fresh.then_some(0.0)) {
+            return (
+                vec![LimitWindow {
+                    id: "credits".into(),
+                    label: pool_label(kind),
+                    used,
+                    resets_at,
+                    ..Default::default()
+                }],
+                String::new(),
+            );
+        }
+    }
 
     let mut out: Vec<LimitWindow> = Vec::new();
     let products = config.get("productUsage").and_then(|x| x.as_array());
@@ -320,25 +404,18 @@ pub fn parse_credits(v: &serde_json::Value) -> (Vec<LimitWindow>, String) {
         }
     }
 
-    // A weekly plan pool (X Premium+, SuperGrok) states its window in `currentPeriod` and omits
-    // the percentages until usage lands, so the branches above find nothing on a fresh period.
-    // Grok's own /usage still shows a "Weekly limit" bar at 0 %, so mirror that rather than
-    // reporting the account as unmetered.
-    if out.is_empty() {
-        let weekly = current
-            .and_then(|p| p.get("type"))
-            .and_then(|x| x.as_str())
-            .map(|t| t.contains("WEEKLY"))
-            .unwrap_or(false);
-        if weekly {
-            out.push(LimitWindow {
-                id: "credits".into(),
-                label: "Weekly limit".into(),
-                used: 0.0,
-                resets_at,
-                ..Default::default()
-            });
-        }
+    // A weekly plan pool states its window in `currentPeriod` and omits the percentages until
+    // usage lands, so the branches above find nothing on a fresh period. Grok's own /usage still
+    // shows a "Weekly limit" bar at 0 %, so mirror that rather than reporting the account as
+    // unmetered. A monthly period is the shared pool, handled above.
+    if out.is_empty() && kind == "weekly" {
+        out.push(LimitWindow {
+            id: "credits".into(),
+            label: "Weekly limit".into(),
+            used: 0.0,
+            resets_at,
+            ..Default::default()
+        });
     }
 
     if out.is_empty() {
@@ -509,6 +586,7 @@ mod tests {
             r#"{ "config": { "currentPeriod": { "type": "USAGE_PERIOD_TYPE_WEEKLY",
                                                 "start": "2026-09-05T08:21:18Z", "end": "2026-09-12T08:21:18Z" },
                              "creditUsagePercent": 8.0,
+                             "isUnifiedBillingUser": true,
                              "productUsage": [{ "product": "GrokBuild", "usagePercent": 8.0 }] } }"#,
         )
         .unwrap();
@@ -516,7 +594,7 @@ mod tests {
         assert!(note.is_empty());
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].id, "credits");
-        assert_eq!(w[0].label, "Grok Build");
+        assert_eq!(w[0].label, "Weekly limit");
         assert!((w[0].used - 0.08).abs() < 1e-9);
         assert!(w[0].resets_at.is_some());
     }
@@ -532,6 +610,67 @@ mod tests {
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].id, "credits");
         assert_eq!(w[0].used, 0.0);
+    }
+
+    #[test]
+    fn the_shared_pool_is_one_window() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{ "config": { "currentPeriod": { "type": "USAGE_PERIOD_TYPE_MONTHLY",
+                                                "start": "2026-10-01T00:00:00Z", "end": "2026-11-01T00:00:00Z" },
+                             "creditUsagePercent": 12.0, "isUnifiedBillingUser": true,
+                             "productUsage": [ { "product": "Grok", "usagePercent": 4.0 },
+                                               { "product": "GrokBot", "usagePercent": 5.0 },
+                                               { "product": "Cursor", "usagePercent": 3.0 } ] } }"#,
+        )
+        .unwrap();
+        let (w, note) = parse_credits(&v);
+        assert!(note.is_empty());
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].id, "credits");
+        assert_eq!(w[0].label, "Monthly limit");
+        assert!((w[0].used - 0.12).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_fresh_monthly_pool_reads_as_zero() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{ "config": { "currentPeriod": { "type": "USAGE_PERIOD_TYPE_MONTHLY", "end": "2026-11-01T00:00:00Z" } } }"#,
+        )
+        .unwrap();
+        let (w, note) = parse_credits(&v);
+        assert!(note.is_empty());
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].label, "Monthly limit");
+        assert_eq!(w[0].used, 0.0);
+    }
+
+    #[test]
+    fn a_unified_product_percent_is_the_pool() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{ "config": { "currentPeriod": { "type": "USAGE_PERIOD_TYPE_WEEKLY", "end": "2026-09-12T08:21:18Z" },
+                             "isUnifiedBillingUser": true,
+                             "productUsage": [{ "product": "GrokBuild", "usagePercent": 33.0 }] } }"#,
+        )
+        .unwrap();
+        let (w, note) = parse_credits(&v);
+        assert!(note.is_empty());
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].label, "Weekly limit");
+        assert!((w[0].used - 0.33).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_legacy_build_allowance_keeps_its_product_name() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{ "config": { "creditUsagePercent": 8.0,
+                             "productUsage": [{ "product": "GrokBuild", "usagePercent": 8.0 }] } }"#,
+        )
+        .unwrap();
+        let (w, note) = parse_credits(&v);
+        assert!(note.is_empty());
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].label, "Grok Build");
+        assert!((w[0].used - 0.08).abs() < 1e-9);
     }
 
     #[test]

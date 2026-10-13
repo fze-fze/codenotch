@@ -58,7 +58,7 @@ pub struct AppState {
     pub codex: Mutex<usage::UsageSnapshot>,
     pub reset_alerts: reset_alert::AlertQueue,
     pub cursor: Mutex<usage::UsageSnapshot>,
-    /// Grok Build credits, read from the Grok CLI's own session
+    /// Included Grok pool, read from the Grok CLI's own session
     pub grok: Mutex<usage::UsageSnapshot>,
     /// GitHub Copilot quotas, read with the GitHub CLI's own session
     pub copilot: Mutex<usage::UsageSnapshot>,
