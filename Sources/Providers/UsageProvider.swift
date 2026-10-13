@@ -1,10 +1,5 @@
 import Foundation
 
-enum ProviderKind: Equatable {
-    case usage
-    case localRuntime
-}
-
 /// How recent a reading has to be to answer a fetch.
 ///
 /// Several providers hold a cheaper source that is older than a live one:
@@ -42,7 +37,6 @@ enum UsageFreshness: Equatable {
 /// One source of usage numbers. Each adapter declares how trustworthy it is,
 /// and the UI never dresses a derived number up as an official one.
 protocol UsageProvider {
-    var kind: ProviderKind { get }
     var id: String { get }
     /// Enough to draw the cell even when a fetch has never succeeded.
     var displayName: String { get }
@@ -93,13 +87,6 @@ protocol UsageProvider {
     /// and no prompt appears. A requirement, not an extension member, for the
     /// reason spelled out above `account()`.
     func forgetCachedCredential()
-    /// Whether this provider should keep a cell or placeholder in the notch when
-    /// its account or daemon is unavailable. Most providers default to `true`
-    /// so users see sign-in guidance; local daemon providers return `false`
-    /// so an inactive service does not take up a ring in the notch.
-    var isVisibleWhenAbsent: Bool { get }
-    /// Optional custom icon image filename saved on disk.
-    var customIconFilename: String? { get }
 }
 
 extension UsageProvider {
@@ -110,14 +97,6 @@ extension UsageProvider {
     }
 
     func presentAccountSwitch() { presentSignIn() }
-
-    var isVisibleWhenAbsent: Bool { true }
-
-    var customIconFilename: String? { nil }
-}
-
-extension UsageProvider {
-    var kind: ProviderKind { .usage }
 }
 
 enum UsageProviderError: Error {

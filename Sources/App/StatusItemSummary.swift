@@ -56,7 +56,7 @@ struct StatusItemSummary: Equatable {
     /// Settings lists exactly these, so it never offers a provider the bar
     /// would not draw.
     static func canSummarise(_ snapshot: ProviderSnapshot) -> Bool {
-        snapshot.kind == .usage && (snapshot.fiveHourWindow != nil || isFiveHourFamily(snapshot.id))
+        snapshot.fiveHourWindow != nil || isFiveHourFamily(snapshot.id)
     }
 
     /// The chosen providers the bar can summarise, in the order the notch shows
@@ -103,7 +103,6 @@ struct StatusItemSummary: Equatable {
         let countdown = window?.resetsAt.flatMap { ResetCopy.countdown(to: $0, now: now) }
         let label = sharesMark
             ? ClaudeProfile.slug(fromProviderID: snapshot.id) ?? CodexProfile.slug(fromProviderID: snapshot.id)
-                ?? CommandCodeProfile.slug(fromProviderID: snapshot.id)
             : nil
         let weeklyWindow = showingWeeklyLimit ? snapshot.weeklyLimitWindow : nil
         let weeklyIsOver = weeklyWindow?.resetsAt.map { $0 <= now } ?? false

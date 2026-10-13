@@ -30,15 +30,14 @@ struct PhoneLinkSnapshotBuilder {
         
         if !order.isEmpty {
             orderedSnaps.sort { a, b in
-                let aIndex = order.firstIndex(of: a.providerID) ?? Int.max
-                let bIndex = order.firstIndex(of: b.providerID) ?? Int.max
+                let aIndex = order.firstIndex(of: a.id) ?? Int.max
+                let bIndex = order.firstIndex(of: b.id) ?? Int.max
                 return aIndex < bIndex
             }
         }
         
         for snap in orderedSnaps {
-            if disconnected.contains(snap.providerID) { continue }
-            if snap.kind == .localRuntime { continue }
+            if disconnected.contains(snap.id) { continue }
             
             var kindStr = "ok"
             var sinceStr: String? = nil

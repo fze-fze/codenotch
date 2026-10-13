@@ -21,48 +21,16 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(Array(seenProviders), forKey: Keys.seen) }
     }
 
-    /// Loaded-model cells hide without stopping the shared runtime. Stored as
-    /// the ones that are off: a model Ollama or LM Studio loads later stays
-    /// visible until someone hides it. Providers cannot share this list —
-    /// their on-list treats absence as off.
-    @Published private(set) var disabledModels: Set<String> {
-        didSet { defaults.set(Array(disabledModels), forKey: Keys.disabledModels) }
-    }
-
     /// The old hidden-providers list, kept only until `reconcile` can invert it
     /// against the ids actually on this Mac.
     private var pendingHidden: Set<String>?
 
-    @Published var ollamaMetricsEnabled: Bool {
-        didSet { defaults.set(ollamaMetricsEnabled, forKey: Keys.ollamaMetricsEnabled) }
-    }
-
-    @Published var ollamaEndpoint: String {
-        didSet { defaults.set(ollamaEndpoint, forKey: Keys.ollamaEndpoint) }
-    }
-
-    /// Where LM Studio's server answers. Defaults to the port LM Studio's own
-    /// settings name, so a server moved off 1234 is found without typing.
     @Published var phoneLinkEnabled: Bool {
         didSet { defaults.set(phoneLinkEnabled, forKey: Keys.phoneLinkEnabled) }
     }
 
     @Published var phoneLinkPort: Int {
         didSet { defaults.set(phoneLinkPort, forKey: Keys.phoneLinkPort) }
-    }
-
-
-    @Published var lmstudioEndpoint: String {
-        didSet { defaults.set(lmstudioEndpoint, forKey: Keys.lmstudioEndpoint) }
-    }
-
-    /// User-configured custom OpenAI-compatible endpoints.
-    @Published var customEndpoints: [CustomEndpoint] {
-        didSet {
-            if let data = try? JSONEncoder().encode(customEndpoints) {
-                defaults.set(data, forKey: Keys.customEndpoints)
-            }
-        }
     }
 
     /// Providers whose threshold alerts are muted. Stored as the muted set so
@@ -238,32 +206,6 @@ final class Preferences: ObservableObject {
     /// the main Codex window either way.
     @Published var showCodexExtraLimits: Bool {
         didSet { defaults.set(showCodexExtraLimits, forKey: Keys.showCodexExtraLimits) }
-    }
-
-    /// Whether DeepSeek's current peak/off-peak billing phase is shown in its
-    /// usage card. Enabled by default because the card's pricing rows are
-    /// useful only when the rule is visible and understood.
-    @Published var deepSeekPricingEnabled: Bool {
-        didSet { defaults.set(deepSeekPricingEnabled, forKey: Keys.deepSeekPricingEnabled) }
-    }
-
-    /// The locally maintained DeepSeek billing rule. It is stored as one
-    /// Codable value so adding another rule field does not scatter more keys
-    /// through the preferences store.
-    @Published var deepSeekPricingSchedule: DeepSeekPricing.Schedule {
-        didSet {
-            let normalized = deepSeekPricingSchedule.normalized
-            if normalized != deepSeekPricingSchedule {
-                deepSeekPricingSchedule = normalized
-                return
-            }
-            guard let data = try? JSONEncoder().encode(deepSeekPricingSchedule) else { return }
-            defaults.set(data, forKey: Keys.deepSeekPricingSchedule)
-        }
-    }
-
-    func resetDeepSeekPricingSchedule() {
-        deepSeekPricingSchedule = .current
     }
 
     /// Whether the weekly limit gets a ring of its own, and where it sits.
@@ -456,36 +398,6 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(limitReachedSoundName, forKey: Keys.limitReachedSoundName) }
     }
 
-    /// The ceiling the Gemini API ring fills against, counted in tokens.
-    ///
-    /// In tokens rather than money because a bare `GEMINI_API_KEY` publishes no
-    /// limit of any kind — there is nothing to read, so the ceiling has to come
-    /// from the user — and because prices change under the app while a token
-    /// stays a token. `nil` means no ceiling, which is the honest default: the
-    /// key is billed per token with no cap.
-    @Published var geminiAPIMonthlyTokenBudget: Int? {
-        didSet {
-            if let budget = geminiAPIMonthlyTokenBudget, budget > 0 {
-                defaults.set(budget, forKey: Keys.geminiAPIMonthlyTokenBudget)
-            } else {
-                defaults.removeObject(forKey: Keys.geminiAPIMonthlyTokenBudget)
-            }
-        }
-    }
-
-    @Published var qoderRegion: Sites.QoderRegion {
-        didSet { defaults.set(qoderRegion.rawValue, forKey: Keys.qoderRegion) }
-    }
-
-    /// Which MiniMax console the Coding Plan is read from.
-    ///
-    /// International and China mainland are different hosts, and a key issued
-    /// on one is refused by the other. Absent means never chosen, which is
-    /// international.
-    @Published var minimaxRegion: MiniMaxRegion {
-        didSet { defaults.set(minimaxRegion.rawValue, forKey: Keys.minimaxRegion) }
-    }
-
     /// The version whose changes have already been shown.
     ///
     /// Written when the What's New dialogue is dismissed rather than when it
@@ -512,15 +424,10 @@ final class Preferences: ObservableObject {
         static let disconnected = "hiddenProviders"
         static let connected = "connectedProviders"
         static let seen = "seenProviders"
-        static let disabledModels = "disabledModels"
-        static let ollamaEndpoint = "ollamaEndpoint"
         static let phoneLinkEnabled = "phoneLinkEnabled"
         static let phoneLinkPort = "phoneLinkPort"
 
-        static let lmstudioEndpoint = "lmstudioEndpoint"
         static let introducedOllama = "introducedOllama"
-        static let migratedOllamaID = "migratedOllamaLocalID"
-        static let ollamaMetricsEnabled = "ollamaMetricsEnabled"
         static let mutedAlerts = "mutedAlertProviders"
         static let accountNicknames = "accountNicknames"
         static let hasLaunched = "hasLaunchedBefore"
@@ -552,7 +459,6 @@ final class Preferences: ObservableObject {
         static let watchLimit = "watchLimit"
         static let criticalLimit = "criticalLimit"
         static let colorTransitionStyle = "colorTransitionStyle"
-        static let customEndpoints = "customEndpoints"
         static let lastSeenVersion = "lastSeenVersion"
         static let order = "providerOrder"
         static let announceSessionEnd = "announceSessionEnd"
@@ -567,30 +473,11 @@ final class Preferences: ObservableObject {
         static let announceWeeklyLimitReached = "announceWeeklyLimitReached"
         static let limitReachedSound = "limitReachedSound"
         static let limitReachedSoundName = "limitReachedSoundName"
-        /// A new key, so there is nothing under the old app name to migrate.
-        static let geminiAPIMonthlyTokenBudget = "geminiAPIMonthlyTokenBudget"
-        static let minimaxRegion = "minimaxRegion"
-        static let qoderRegion = "qoderRegion"
         static let antigravityHeadlineLimit = "antigravityHeadlineLimit"
         static let antigravityHeadlineModel = "antigravityHeadlineModel"
-        static let deepSeekPricingEnabled = "deepSeekPricingEnabled"
-        static let deepSeekPricingSchedule = "deepSeekPricingSchedule"
         static let showCodexExtraLimits = "showCodexExtraLimits"
     }
 
-    /// The budget read straight from disk, off the main actor.
-    ///
-    /// The Gemini API provider is an actor and asks for this on every fetch, and
-    /// `@Published` state is main-actor-isolated where `UserDefaults` is
-    /// thread-safe — so the provider reads the store, not the object.
-    nonisolated static func storedGeminiAPIMonthlyTokenBudget(
-        defaults: UserDefaults = .standard
-    ) -> Int? {
-        guard let budget = defaults.object(forKey: Keys.geminiAPIMonthlyTokenBudget) as? Int,
-              budget > 0
-        else { return nil }
-        return budget
-    }
     
     nonisolated static func storedAntigravityHeadlineLimit(
         defaults: UserDefaults = .standard
@@ -622,76 +509,6 @@ final class Preferences: ObservableObject {
         defaults: UserDefaults = .standard
     ) -> Bool {
         defaults.object(forKey: Keys.showCodexExtraLimits) as? Bool ?? true
-    }
-
-    /// The MiniMax region read straight from disk, off the main actor.
-    ///
-    /// Custom endpoints read straight from disk, off the main actor.
-    ///
-    /// Moves any key an earlier build left in the defaults plist into the keychain,
-    /// once, and writes the list back without it.
-    ///
-    /// The rewrite is the point. `customEndpoints` is assigned during `init`, where
-    /// `didSet` does not run, so without this the plaintext key stayed in the plist —
-    /// readable by any process running as the user, and swept into backups — until
-    /// the user happened to edit that endpoint. Returns the list with the carried
-    /// keys cleared, so a later encode cannot put them back.
-    nonisolated static func movingLegacyKeysToKeychain(
-        _ list: [CustomEndpoint],
-        defaults: UserDefaults
-    ) -> [CustomEndpoint] {
-        guard list.contains(where: { $0.legacyAPIKey != nil }) else { return list }
-        var migrated = list
-        for index in migrated.indices {
-            guard let legacy = migrated[index].legacyAPIKey else { continue }
-            // Only if the keychain has nothing: a key already moved is the newer one.
-            if migrated[index].apiKey == nil {
-                migrated[index].saveAPIKey(legacy)
-            }
-            migrated[index].legacyAPIKey = nil
-        }
-        if let data = try? JSONEncoder().encode(migrated) {
-            defaults.set(data, forKey: Keys.customEndpoints)
-        }
-        return migrated
-    }
-
-    /// Custom endpoint providers are actors and ask for this on every fetch, and
-    /// `@Published` state is main-actor-isolated where `UserDefaults` is
-    /// thread-safe — so providers read the store, not the object.
-    nonisolated static func storedCustomEndpoints(
-        defaults: UserDefaults = .standard
-    ) -> [CustomEndpoint] {
-        guard let data = defaults.data(forKey: Keys.customEndpoints),
-              let endpoints = try? JSONDecoder().decode([CustomEndpoint].self, from: data)
-        else { return [] }
-        return endpoints
-    }
-
-    nonisolated static func updateStoredCustomEndpoint(
-        _ endpoint: CustomEndpoint,
-        defaults: UserDefaults = .standard
-    ) {
-        var endpoints = storedCustomEndpoints(defaults: defaults)
-        guard let index = endpoints.firstIndex(where: { $0.id == endpoint.id }) else { return }
-        endpoints[index] = endpoint
-        if let data = try? JSONEncoder().encode(endpoints) {
-            defaults.set(data, forKey: Keys.customEndpoints)
-        }
-    }
-
-    /// The MiniMax region read straight from disk, off the main actor.
-    ///
-    /// The provider is an actor and asks for this on every fetch, and
-    /// `@Published` state is main-actor-isolated where `UserDefaults` is
-    /// thread-safe — so the provider reads the store, not the object.
-    nonisolated static func storedMinimaxRegion(
-        defaults: UserDefaults = .standard
-    ) -> MiniMaxRegion {
-        guard let value = defaults.string(forKey: Keys.minimaxRegion),
-              let region = MiniMaxRegion(rawValue: value)
-        else { return .international }
-        return region
     }
 
     /// True the very first time this copy runs, and never again.
@@ -730,23 +547,6 @@ final class Preferences: ObservableObject {
         self.defaults = defaults
         self.isFirstLaunch = !defaults.bool(forKey: Keys.hasLaunched)
         defaults.set(true, forKey: Keys.hasLaunched)
-        // Only the earlier local integration used this sentinel. Keep unrelated
-        // provider IDs untouched when upgrading from upstream.
-        if defaults.bool(forKey: Keys.introducedOllama),
-           !defaults.bool(forKey: Keys.migratedOllamaID) {
-            for key in [Keys.disconnected, Keys.order, Keys.mutedAlerts] {
-                var seen = Set<String>()
-                let migrated = (defaults.stringArray(forKey: key) ?? []).map { id in
-                    if id == "ollama" { return "ollama-local" }
-                    if id.hasPrefix("ollama:model:") {
-                        return "ollama-local:model:" + id.dropFirst("ollama:model:".count)
-                    }
-                    return id
-                }.filter { seen.insert($0).inserted }
-                defaults.set(migrated, forKey: key)
-            }
-            defaults.set(true, forKey: Keys.migratedOllamaID)
-        }
         let storedConnected = defaults.stringArray(forKey: Keys.connected)
         let storedSeen = Set(defaults.stringArray(forKey: Keys.seen) ?? [])
         let connected: Set<String>
@@ -771,43 +571,11 @@ final class Preferences: ObservableObject {
             connected = []
             seen = storedSeen
         }
-        self.connectedProviders = connected.filter { !Self.isModelCell($0) }
-        self.seenProviders = seen.filter { !Self.isModelCell($0) }
+        self.connectedProviders = connected
+        self.seenProviders = seen
         self.pendingHidden = hidden
-        let models: Set<String>
-        if let storedDisabled = defaults.stringArray(forKey: Keys.disabledModels) {
-            models = Set(storedDisabled)
-        } else {
-            // Model cells that lived on the old off-list stay off. Read the
-            // leftover even after `connectedProviders` exists: an earlier
-            // invert left those ids in `hiddenProviders` and then ignored them.
-            let leftover = hidden ?? Set(defaults.stringArray(forKey: Keys.disconnected) ?? [])
-            models = leftover.filter(Self.isModelCell)
-        }
-        self.disabledModels = models
-        defaults.set(Array(models), forKey: Keys.disabledModels)
-        let ollamaOn: Bool
-        if storedConnected != nil {
-            ollamaOn = connected.contains("ollama-local")
-        } else if let hidden {
-            ollamaOn = !hidden.contains("ollama-local")
-        } else {
-            ollamaOn = false
-        }
-        self.ollamaMetricsEnabled = defaults.object(forKey: Keys.ollamaMetricsEnabled) as? Bool
-            ?? (defaults.bool(forKey: Keys.introducedOllama) && ollamaOn)
-        self.ollamaEndpoint = (try? OllamaEndpoint.parse(
-            defaults.string(forKey: Keys.ollamaEndpoint) ?? OllamaEndpoint.defaultAddress
-        ).absoluteString) ?? OllamaEndpoint.defaultAddress
-        // A stored choice wins; otherwise LM Studio's own configuration file
-        // says where it listens, and 1234 is what it ships with.
         self.phoneLinkEnabled = defaults.object(forKey: Keys.phoneLinkEnabled) as? Bool ?? false
         self.phoneLinkPort = defaults.object(forKey: Keys.phoneLinkPort) as? Int ?? 8788
-
-        self.lmstudioEndpoint = (try? LMStudioEndpoint.parse(
-            defaults.string(forKey: Keys.lmstudioEndpoint)
-                ?? LMStudioEndpoint.configuredAddress() ?? LMStudioEndpoint.defaultAddress
-        ).absoluteString) ?? LMStudioEndpoint.defaultAddress
         self.mutedAlertProviders = Set(defaults.stringArray(forKey: Keys.mutedAlerts) ?? [])
         self.accountNicknames = defaults.dictionary(forKey: Keys.accountNicknames) as? [String: String] ?? [:]
         // Absent means never chosen, which is the hover behaviour the app was
@@ -865,13 +633,6 @@ final class Preferences: ObservableObject {
         // Off by default for the same reason: it changes what every ring means.
         self.weeklyHeadline = defaults.bool(forKey: Keys.weeklyHeadline)
         self.showCodexExtraLimits = Self.storedShowCodexExtraLimits(defaults: defaults)
-        self.deepSeekPricingEnabled = defaults.object(forKey: Keys.deepSeekPricingEnabled) as? Bool ?? true
-        if let data = defaults.data(forKey: Keys.deepSeekPricingSchedule),
-           let schedule = try? JSONDecoder().decode(DeepSeekPricing.Schedule.self, from: data) {
-            self.deepSeekPricingSchedule = schedule.normalized
-        } else {
-            self.deepSeekPricingSchedule = .current
-        }
         // Absent means never chosen. Main display only, because that is what a
         // single-panel setup always did — all-displays on a fresh install
         // would put notches where none were expected.
@@ -933,72 +694,9 @@ final class Preferences: ObservableObject {
         self.limitReachedSound = defaults.object(forKey: Keys.limitReachedSound) as? Bool ?? true
         self.limitReachedSoundName = defaults.string(forKey: Keys.limitReachedSoundName)
             ?? SessionChime.defaultBlocked
-        self.geminiAPIMonthlyTokenBudget = Self.storedGeminiAPIMonthlyTokenBudget(defaults: defaults)
-        self.minimaxRegion = Self.storedMinimaxRegion(defaults: defaults)
-        self.qoderRegion = Sites.QoderRegion(rawValue: defaults.string(forKey: Keys.qoderRegion) ?? "") ?? .global
-        if let data = defaults.data(forKey: Keys.customEndpoints),
-           let list = try? JSONDecoder().decode([CustomEndpoint].self, from: data) {
-            self.customEndpoints = Self.movingLegacyKeysToKeychain(list, defaults: defaults)
-        } else {
-            self.customEndpoints = []
-        }
         // Read from the system rather than from our own store: the user can turn
         // this off in System Settings, and a remembered `true` would then be a lie.
         self.launchAtLogin = Self.isRegisteredForLogin
-    }
-
-    // MARK: Custom Endpoints
-
-    func addCustomEndpoint(_ endpoint: CustomEndpoint) {
-        customEndpoints.append(endpoint)
-        if endpoint.isEnabled {
-            setConnected(true, for: endpoint.providerID)
-        }
-    }
-
-    func updateCustomEndpoint(_ endpoint: CustomEndpoint) {
-        if let idx = customEndpoints.firstIndex(where: { $0.id == endpoint.id }) {
-            var merged = endpoint
-            // Check latest stored endpoint in UserDefaults to merge latest readings if mapping hasn't changed
-            let storedList = Self.storedCustomEndpoints(defaults: defaults)
-            if let stored = storedList.first(where: { $0.id == endpoint.id }) {
-                let mappingUnchanged = (stored.usageSource == endpoint.usageSource)
-                    && (stored.usagePreset == endpoint.usagePreset)
-                    && (stored.usageURL == endpoint.usageURL)
-                    && (stored.usageRecordsPath == endpoint.usageRecordsPath)
-                    && (stored.usageModelField == endpoint.usageModelField)
-                    && (stored.usageTokenField == endpoint.usageTokenField)
-                    && (stored.usageModelFilter == endpoint.usageModelFilter)
-                    && (stored.trackingUnit == endpoint.trackingUnit)
-
-                // If mapping is unchanged and user did not explicitly reset or edit readings:
-                // When the editor loaded, it had stored (or earlier) readings. If the user didn't change them
-                // in the editor, we preserve the latest stored readings that might have been sampled in the background.
-                if mappingUnchanged {
-                    if merged.currentTokensUsedM == customEndpoints[idx].currentTokensUsedM {
-                        merged.currentTokensUsedM = stored.currentTokensUsedM
-                    }
-                    if merged.usageHistory == customEndpoints[idx].usageHistory {
-                        merged.usageHistory = stored.usageHistory
-                    }
-                    if merged.currentSpendUSD == customEndpoints[idx].currentSpendUSD {
-                        merged.currentSpendUSD = stored.currentSpendUSD
-                    }
-                }
-            }
-            customEndpoints[idx] = merged
-            setConnected(merged.isEnabled, for: merged.providerID)
-        }
-    }
-
-    func removeCustomEndpoint(id: String) {
-        if let endpoint = customEndpoints.first(where: { $0.id == id }) {
-            setConnected(false, for: endpoint.providerID)
-            if let filename = endpoint.customIconFilename {
-                CustomIconStore.deleteIcon(filename: filename)
-            }
-        }
-        customEndpoints.removeAll { $0.id == id }
     }
 
     // MARK: Account names
@@ -1052,38 +750,18 @@ final class Preferences: ObservableObject {
             || CodexProfile.isCodex(providerID: providerID)
     }
 
-    /// Model cells are `providerID:model:…`. A new loaded model is not a new
-    /// provider, and absence on the provider on-list cannot mean on for these.
-    static func isModelCell(_ id: String) -> Bool {
-        id.contains(":model:")
-    }
-
     func isConnected(_ providerID: String) -> Bool {
-        if Self.isModelCell(providerID) {
-            return !disabledModels.contains(providerID)
-        }
         if defaults.object(forKey: Keys.connected) != nil {
             return connectedProviders.contains(providerID)
         }
         if let hidden = pendingHidden {
-            // Absence from the old off-list means on — for providers that
-            // off-list could have named. MiniMax did not exist then, so
-            // missing from it is not a choice to show it.
-            if providerID == "minimax" { return false }
+            // Absence from the old off-list means on.
             return !hidden.contains(providerID)
         }
         return Self.isDefaultOnFamily(providerID)
     }
 
     func setConnected(_ connected: Bool, for providerID: String) {
-        if Self.isModelCell(providerID) {
-            if connected {
-                disabledModels.remove(providerID)
-            } else {
-                disabledModels.insert(providerID)
-            }
-            return
-        }
         if defaults.object(forKey: Keys.connected) == nil, let hidden = pendingHidden {
             let next = connected ? hidden.subtracting([providerID]) : hidden.union([providerID])
             pendingHidden = next
@@ -1107,13 +785,10 @@ final class Preferences: ObservableObject {
     ///
     /// First launch writes Claude and Codex. An upgrade from `hiddenProviders`
     /// inverts that off-list against `discoveredIDs`. After that, only a
-    /// never-seen Claude or Codex id is added automatically. Model cells stay
-    /// on `disabledModels` and are not inverted.
+    /// never-seen Claude or Codex id is added automatically.
     func reconcile(discoveredIDs: [String]) {
-        let discovered = Set(discoveredIDs.filter { !Self.isModelCell($0) })
+        let discovered = Set(discoveredIDs)
         if defaults.object(forKey: Keys.connected) != nil {
-            connectedProviders.subtract(connectedProviders.filter(Self.isModelCell))
-            seenProviders.subtract(seenProviders.filter(Self.isModelCell))
             let novel = discovered.subtracting(seenProviders)
             for id in novel where Self.isDefaultOnFamily(id) {
                 connectedProviders.insert(id)
@@ -1122,11 +797,8 @@ final class Preferences: ObservableObject {
             return
         }
         if let hidden = pendingHidden {
-            // Invert the old off-list, then drop MiniMax: it did not exist
-            // when that list was written, so absence from it is not "on".
-            connectedProviders = discovered
-                .subtracting(hidden.filter { !Self.isModelCell($0) })
-                .subtracting(["minimax"])
+            // Invert the old off-list against the providers on this Mac.
+            connectedProviders = discovered.subtracting(hidden)
             seenProviders = discovered
             pendingHidden = nil
             return

@@ -44,7 +44,7 @@ final class AccessibilityTransparencyTests: XCTestCase {
     func testExhaustedAndStaleProviderRingsRenderUnderReducedTransparency() throws {
         let staleExhaustedRing = ProviderRing(
             usedFraction: 1.0,
-            glyph: .cursor,
+            glyph: .grok,
             isStale: true,
             isBlocked: true,
             activity: ActivitySummary(sessions: [session("s1", .waiting)])

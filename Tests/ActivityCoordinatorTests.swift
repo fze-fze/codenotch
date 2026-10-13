@@ -51,46 +51,6 @@ final class ActivityCoordinatorTests: XCTestCase {
         XCTAssertEqual(delivered.count, countAfterDisconnect)
     }
 
-    func testSupplementalSessionsMergeWithNativeActivity() async throws {
-        let monitor = Monitor()
-        var delivered: [AgentSession] = []
-        let coordinator = ActivityCoordinator(monitors: ["a": monitor]) { _, sessions in
-            delivered = sessions
-        }
-        coordinator.setEnabled(["a"])
-        monitor.sessions = [AgentSession(id: "native", name: "Native", detail: "Working",
-                                         state: .busy, waitingFor: nil, since: Date())]
-        coordinator.setSupplementalSessions(
-            providerID: "a",
-            source: "pi",
-            sessions: [AgentSession(id: "pi", name: "Pi", detail: "Working",
-                                    state: .busy, waitingFor: nil, since: Date())]
-        )
-        try await Task.sleep(for: .milliseconds(30))
-
-        XCTAssertEqual(Set(delivered.map(\.id)), ["native", "pi"])
-        XCTAssertTrue(coordinator.isBusy)
-    }
-
-    func testSupplementalOnlyProviderHonorsConnectionState() {
-        var delivered: [AgentSession] = []
-        let coordinator = ActivityCoordinator(monitors: [:]) { _, sessions in
-            delivered = sessions
-        }
-        let session = AgentSession(id: "pi", name: "Pi", detail: "Working",
-                                   state: .busy, waitingFor: nil, since: Date())
-
-        coordinator.setSupplementalSessions(providerID: "glm", source: "pi", sessions: [session])
-        XCTAssertTrue(delivered.isEmpty)
-        coordinator.setEnabled(["glm"])
-        coordinator.setSupplementalSessions(providerID: "glm", source: "pi", sessions: [session])
-        XCTAssertEqual(delivered.map(\.id), ["pi"])
-        XCTAssertTrue(coordinator.isBusy)
-        coordinator.setEnabled([])
-        XCTAssertEqual(delivered, [])
-        XCTAssertFalse(coordinator.isBusy)
-    }
-
     func testReconnectResubscribesAndPublishesAgain() async {
         let monitor = Monitor()
         let received = expectation(description: "Reconnected activity reaches the notch")

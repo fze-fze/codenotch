@@ -1,8 +1,8 @@
 import Combine
 import Foundation
 
-/// Owns session-monitor lifetimes and merges supplemental activity sources such
-/// as Pi without letting either source overwrite the other's sessions.
+/// Owns session-monitor lifetimes: starts a provider's monitor while it is
+/// switched on, stops it when it is switched off, and forwards its sessions.
 @MainActor
 final class ActivityCoordinator {
     private let monitors: [String: any AgentActivityMonitor]
@@ -10,7 +10,6 @@ final class ActivityCoordinator {
     private var subscriptions: [String: AnyCancellable] = [:]
     private var enabledIDs: Set<String> = []
     private var nativeSessions: [String: [AgentSession]] = [:]
-    private var supplementalSessions: [String: [String: [AgentSession]]] = [:]
     private(set) var activeIDs: Set<String> = []
 
     init(monitors: [String: any AgentActivityMonitor],
@@ -22,8 +21,7 @@ final class ActivityCoordinator {
     var isBusy: Bool {
         enabledIDs.contains { id in
             let native = activeIDs.contains(id) ? monitors[id]?.sessions ?? [] : []
-            let supplemental = supplementalSessions[id]?.values.flatMap { $0 } ?? []
-            return (native + supplemental).contains { $0.state == .busy }
+            return native.contains { $0.state == .busy }
         }
     }
 
@@ -39,7 +37,6 @@ final class ActivityCoordinator {
             nativeSessions.removeValue(forKey: id)
         }
         for id in disabled {
-            supplementalSessions.removeValue(forKey: id)
             onSessions(id, [])
         }
         for id in wanted.subtracting(activeIDs) {
@@ -56,13 +53,6 @@ final class ActivityCoordinator {
         }
     }
 
-    func setSupplementalSessions(providerID: String, source: String,
-                                 sessions: [AgentSession]) {
-        guard enabledIDs.contains(providerID) else { return }
-        supplementalSessions[providerID, default: [:]][source] = sessions
-        publish(providerID)
-    }
-
     func stop() { setEnabled([]) }
 
     private func publish(_ id: String) {
@@ -71,8 +61,7 @@ final class ActivityCoordinator {
     }
 
     private func mergedSessions(for id: String) -> [AgentSession] {
-        let supplemental = supplementalSessions[id]?.values.flatMap { $0 } ?? []
-        return (nativeSessions[id, default: []] + supplemental)
+        nativeSessions[id, default: []]
             .sorted { $0.since == $1.since ? $0.id < $1.id : $0.since > $1.since }
     }
 }

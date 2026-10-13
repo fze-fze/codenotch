@@ -26,21 +26,11 @@ extension View {
 /// crossing-and-notification machinery it switches is Notifications' to
 /// explain.
 private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case accounts, phone, deepseek, ollama, lmstudio, customEndpoints, appearance, notifications, costs, general
+    case accounts, phone, appearance, notifications, costs, general
 
     /// The sections the sidebar lists; Phone only once pairing is offered.
     static var visible: [SettingsSection] {
         allCases.filter { $0 != .phone || PhoneLink.isAvailable }
-    }
-
-    /// Providers with a pane of their own. They are accounts too, so the
-    /// sidebar nests them under Accounts rather than listing them beside
-    /// Appearance and General, where they read as app-wide settings.
-    static let providerPanes: [SettingsSection] = [.deepseek, .ollama, .lmstudio, .customEndpoints]
-
-    /// The sidebar's own rows: everything visible that is not nested.
-    static var topLevel: [SettingsSection] {
-        visible.filter { !providerPanes.contains($0) }
     }
 
     var id: String { rawValue }
@@ -49,25 +39,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .accounts:      return L10n.t("Accounts")
         case .phone:         return L10n.t("Phone")
-        case .deepseek:      return "DeepSeek"
-        case .ollama:        return "Ollama"   // a product name, the same in every language
-        case .lmstudio:      return "LM Studio"
-        case .customEndpoints: return L10n.t("Custom Endpoints")
         case .appearance:    return L10n.t("Appearance")
         case .notifications: return L10n.t("Notifications")
         case .costs:         return L10n.t("Costs")
         case .general:       return L10n.t("General")
-        }
-    }
-
-    /// The provider's own logo, for the sections that are one provider's
-    /// settings; nil for the app's own sections, which use a symbol.
-    var logo: ProviderGlyph? {
-        switch self {
-        case .deepseek: return .deepseek
-        case .ollama:   return .ollama
-        case .lmstudio: return .lmstudio
-        default:        return nil
         }
     }
 
@@ -76,10 +51,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .accounts:      return L10n.t("Choose which providers the notch reads.")
         case .phone:         return L10n.t("See your usage on your phone.")
-        case .deepseek:      return L10n.t("Peak and off-peak pricing for your DeepSeek spend.")
-        case .ollama:        return L10n.t("Models running in Ollama on this Mac.")
-        case .lmstudio:      return L10n.t("Models loaded in LM Studio on this Mac.")
-        case .customEndpoints: return L10n.t("OpenAI-compatible APIs, local runtimes and custom proxies.")
         case .appearance:    return L10n.t("How the notch looks and where it sits.")
         case .notifications: return L10n.t("What Codenotch tells you, and when.")
         case .costs:         return L10n.t("What each project spent of each login's allowance.")
@@ -91,10 +62,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .accounts:      return "person.crop.circle.fill"
         case .phone:         return "iphone"
-        case .deepseek:      return "chart.line.uptrend.xyaxis"
-        case .ollama:        return "desktopcomputer"
-        case .lmstudio:      return "cpu"
-        case .customEndpoints: return "network"
         case .appearance:    return "paintbrush.fill"
         case .notifications: return "bell.badge.fill"
         case .costs:         return "banknote.fill"
@@ -109,10 +76,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .accounts:      return .blue
         case .phone:         return .green
-        case .deepseek:      return .orange
-        case .ollama:        return .teal
-        case .lmstudio:      return .purple
-        case .customEndpoints: return .indigo
         case .appearance:    return .indigo
         case .notifications: return .red
         case .costs:         return .mint
@@ -171,18 +134,16 @@ private enum SettingsPalette {
 }
 
 /// One row of the settings sidebar: a white symbol, the name, and for
-/// Accounts the number switched on and an arrow that folds its providers.
+/// Accounts the number switched on.
 private struct SettingsSidebarRow: View {
     let section: SettingsSection
     let isSelected: Bool
     /// Shared by every row, so the selection pill is one shape that slides
     /// from the old row to the new one rather than blinking between them.
     let selectionSpace: Namespace.ID
-    var indent = false
     var count: Int? = nil
     /// A red dot — a newer version waiting, on General.
     var badge: Bool = false
-    var disclosure: Binding<Bool>? = nil
     let select: () -> Void
 
     @State private var isHovered = false
@@ -226,14 +187,11 @@ private struct SettingsSidebarRow: View {
                     .onChanged { _ in if !isPressed { isPressed = true } }
                     .onEnded { value in
                         isPressed = false
-                        if abs(value.translation.width) < 6, abs(value.translation.height) < 6 { activate() }
+                        if abs(value.translation.width) < 6, abs(value.translation.height) < 6 { select() }
                     }
             )
-            if let disclosure {
-                DisclosureChevron(isExpanded: disclosure)
-            }
         }
-        .padding(.leading, indent ? 28 : 10)
+        .padding(.leading, 10)
         .padding(.trailing, 8)
         .padding(.vertical, 6)
         .background {
@@ -266,62 +224,13 @@ private struct SettingsSidebarRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { activate() }
+        .accessibilityAction { select() }
     }
 
-    /// Selecting Accounts should not also change its disclosure state. Once
-    /// Accounts is already selected, the row remains a convenient larger
-    /// target for folding its provider panes; the chevron stays an independent
-    /// control in either state.
-    private func activate() {
-        if let disclosure, isSelected {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                disclosure.wrappedValue.toggle()
-            }
-        }
-        select()
-    }
-
-    @ViewBuilder
     private var icon: some View {
-        if let logo = section.logo {
-            ProviderGlyphView(glyph: logo, size: 14)
-                .keyframeAnimator(initialValue: 1.0, trigger: bounce) { content, scale in
-                    content.scaleEffect(scale)
-                } keyframes: { _ in
-                    SpringKeyframe(1.18, duration: 0.14)
-                    SpringKeyframe(1.0, duration: 0.3, spring: .bouncy)
-                }
-        } else {
-            Image(systemName: section.icon)
-                .font(.system(size: indent ? 12 : 13, weight: .regular))
-                .symbolEffect(.bounce, value: bounce)
-        }
-    }
-}
-
-/// The arrow that folds Accounts' providers away: brighter under the pointer,
-/// a soft disc behind it, and a springy turn.
-private struct DisclosureChevron: View {
-    @Binding var isExpanded: Bool
-    @State private var isHovered = false
-
-    var body: some View {
-        Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { isExpanded.toggle() }
-        } label: {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(isHovered ? 0.85 : 0.45))
-                .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(.white.opacity(isHovered ? 0.08 : 0)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(SettingsPressStyle())
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) { isHovered = hovering }
-        }
+        Image(systemName: section.icon)
+            .font(.system(size: 13, weight: .regular))
+            .symbolEffect(.bounce, value: bounce)
     }
 }
 
@@ -410,7 +319,6 @@ struct SettingsView: View {
     @State private var selection: SettingsSection = .accounts
     /// Whether Accounts shows its provider panes. Remembered, so someone who
     /// folds the group away finds it folded next time.
-    @AppStorage("settingsAccountsExpanded") private var accountsExpanded = true
     @Namespace private var selectionSpace
     /// The provider being dragged right now.
     ///
@@ -459,8 +367,6 @@ struct SettingsView: View {
     let resetPosition: () -> Void
     let quit: () -> Void
     @ObservedObject var updater: Updater
-    var ollamaRelay: OllamaActivityRelay? = nil
-    var lmstudioMetrics: LMStudioMetrics? = nil
     var usageStore: UsageStore? = nil
     var previewResetAlert: (() -> Void)? = nil
     var previewSessionLimitAlert: (() -> Void)? = nil
@@ -542,18 +448,6 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didChangeScreenParametersNotification
         )) { _ in displays = DisplayOption.connected }
-        .onReceive((usageStore?.$notchSnapshots.eraseToAnyPublisher()
-                    ?? Empty<[ProviderSnapshot], Never>().eraseToAnyPublisher())
-            .receive(on: RunLoop.main)) { _ in
-                // The sheet stays open while models load and unload. Update
-                // those rows without re-reading cloud credentials on each poll.
-                guard let usageStore else { return }
-                let models = usageStore.localModelSummaries
-                let updated = accounts.filter { $0.localModel == nil }.flatMap { account in
-                    [account] + models.filter { $0.sourceProviderID == account.id }
-                }
-                accounts = ProviderOrder.arrange(updated, by: preferences.providerOrder, id: \.id)
-            }
         .onReceive((usageStore?.$providerAccountRevision.eraseToAnyPublisher()
                     ?? Empty<Int, Never>().eraseToAnyPublisher())
             .receive(on: RunLoop.main)) { _ in
@@ -570,9 +464,6 @@ struct SettingsView: View {
                 let choices = MenuBarChoice.listed(in: snapshots)
                 if choices != menuBarChoices { menuBarChoices = choices }
             }
-        .onReceive(preferences.$customEndpoints.receive(on: RunLoop.main)) { _ in
-            accounts = providers()
-        }
     }
 
     /// The subject list: a full-height column on a shade lighter than the
@@ -597,25 +488,15 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(SettingsSection.topLevel) { section in
+                    ForEach(SettingsSection.visible) { section in
                         SettingsSidebarRow(
                             section: section,
                             isSelected: selection == section,
                             selectionSpace: selectionSpace,
                             count: section == .accounts ? connectedCount : nil,
                             badge: section == .general && updater.pending != nil,
-                            disclosure: section == .accounts ? $accountsExpanded : nil,
                             select: { selectSection(section) }
                         )
-                        if section == .accounts, accountsExpanded {
-                            ForEach(SettingsSection.providerPanes) { child in
-                                SettingsSidebarRow(section: child,
-                                                   isSelected: selection == child,
-                                                   selectionSpace: selectionSpace,
-                                                   indent: true,
-                                                   select: { selectSection(child) })
-                            }
-                        }
                     }
                 }
                 .padding(.horizontal, 10)
@@ -647,11 +528,8 @@ struct SettingsView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 16)
         }
-        // Opening a provider's pane from elsewhere must not land on a row
-        // that is folded out of sight.
         .onChange(of: selection) { section in
             if section == .accounts { accounts = providers() }
-            if SettingsSection.providerPanes.contains(section) { accountsExpanded = true }
         }
         .frame(width: SettingsView.sidebarWidth)
         .frame(maxHeight: .infinity)
@@ -671,7 +549,7 @@ struct SettingsView: View {
 
     /// How many providers are switched on, beside Accounts in the sidebar.
     private var connectedCount: Int {
-        accounts.filter { $0.localModel == nil && preferences.isConnected($0.id) }.count
+        accounts.filter { preferences.isConnected($0.id) }.count
     }
 
     /// A large title and a line under it, fixed above the scrolling content,
@@ -708,27 +586,6 @@ struct SettingsView: View {
         case .accounts:      accountsPane
         case .phone:         phonePane
         case .costs:         CostSettingsPane()
-        case .deepseek:      DeepSeekPricingSettingsView(preferences: preferences)
-        case .ollama:
-            if let usageStore {
-                Form {
-                    Section(L10n.t("Connection")) {
-                        OllamaSettingsRow(preferences: preferences, store: usageStore, relay: ollamaRelay)
-                    }
-                }
-                .formStyle(.grouped)
-            }
-        case .lmstudio:
-            if let usageStore {
-                Form {
-                    Section("Connection") {
-                        LMStudioSettingsRow(preferences: preferences, store: usageStore, metrics: lmstudioMetrics)
-                    }
-                }
-                .formStyle(.grouped)
-            }
-        case .customEndpoints:
-            CustomEndpointsSettingsView(preferences: preferences)
         case .appearance:    appearancePane
         case .notifications: notificationsPane
         case .general:       generalPane
@@ -767,7 +624,7 @@ struct SettingsView: View {
                 }
                 // Beside the switches it explains, not stranded at the end of
                 // the page.
-                Text(L10n.t("Most readings are borrowed from a tool that already holds the account. DeepSeek and MiniMax are the exceptions: clicking Sign in opens a Codenotch window for that account, and signing out here clears only that session and its saved reading."))
+                Text(L10n.t("Every reading is borrowed from a tool that already holds the account. Switching one off here stops Codenotch reading it and forgets its saved reading; the tool itself stays signed in."))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -802,7 +659,6 @@ struct SettingsView: View {
         // A row switched off jumps from one group to the other. Scoped to that
         // one value so nothing else on the page inherits an animation.
         .animation(.snappy(duration: 0.25), value: preferences.connectedProviders)
-        .animation(.snappy(duration: 0.25), value: preferences.disabledModels)
     }
 
     // One pane, because they are one question: what Codenotch looks like and
@@ -1479,30 +1335,18 @@ struct SettingsView: View {
     /// section in the app at once — just a comfortable account list.
     static let height: CGFloat = 600
 
-    /// The rows the notch actually draws, in the order it draws them.
-    ///
-    /// Model switches control visibility; their shared runtime has its own
-    /// connection row and must remain enabled for its models to appear.
-    private var ringAccounts: [ProviderSummary] {
-        accounts.filter {
-            $0.kind == .usage || ($0.localModel != nil && preferences.isConnected($0.sourceProviderID ?? $0.id))
-        }
-    }
-
     private var connected: [ProviderSummary] {
-        ringAccounts.filter { preferences.isConnected($0.id) }
+        accounts.filter { preferences.isConnected($0.id) }
     }
 
     private var notConnected: [ProviderSummary] {
-        ringAccounts.filter { !preferences.isConnected($0.id) }
+        accounts.filter { !preferences.isConnected($0.id) }
     }
 
     /// Nothing to read from anywhere. On a first launch that is the normal
     /// state, and it is the only moment the sheet has something to explain.
     private var needsSetup: Bool {
-        guard !connected.contains(where: { $0.localModel != nil }) else { return false }
-        let usageAccounts = accounts.filter { $0.kind == .usage }
-        return !usageAccounts.isEmpty && usageAccounts.allSatisfy { $0.account == nil }
+        !accounts.isEmpty && accounts.allSatisfy { $0.account == nil }
     }
 
     /// Names the tools rather than saying "tools already signed in on this
@@ -1510,7 +1354,7 @@ struct SettingsView: View {
     /// this, sees four blank rings and concludes it is broken — and the
     /// distinction that catches them out is Claude *Code*, not the Claude app.
     static var setupCopy: String {
-        L10n.t("Codenotch reads usage from tools already signed in on this Mac — it never asks for your password. Install and sign in to any of Claude Code (the terminal tool, not the Claude app), Cursor (the editor or cursor-agent), Codex, Antigravity, GLM, Grok, OpenCode, Command Code, GitHub Copilot, Kimi Code, Kiro, Amp, Apify, the Kilo CLI or a Gemini API key (via Gemini CLI, OpenCode or Hermes), and its ring appears in the notch.")
+        L10n.t("Codenotch reads usage from tools already signed in on this Mac — it never asks for your password. Install and sign in to any of Claude Code (the terminal tool, not the Claude app), Codex, Antigravity or Grok, and its ring appears in the notch.")
     }
 
     /// Said before it happens rather than after. A system dialogue asking to
@@ -1793,7 +1637,7 @@ private struct AccountRow: View {
                 HStack(spacing: 10) {
                     if isOrderable { handle }
 
-                    ProviderGlyphView(glyph: provider.glyph, customIconFilename: provider.customIconFilename, size: 16)
+                    ProviderGlyphView(glyph: provider.glyph, size: 16)
                         .foregroundStyle(isConnected ? .primary : .tertiary)
 
                     Text(displayName)
@@ -1819,7 +1663,7 @@ private struct AccountRow: View {
                     // a lot of translucent furniture to move a ring one place
                     // up.
                     HStack(spacing: 6) {
-                        ProviderGlyphView(glyph: provider.glyph, customIconFilename: provider.customIconFilename, size: 12)
+                        ProviderGlyphView(glyph: provider.glyph, size: 12)
                         Text(displayName)
                     }
                     .padding(.horizontal, 8)
@@ -1853,7 +1697,7 @@ private struct AccountRow: View {
                 // the same name has to hold in the notch, the menu bar and
                 // every notification, so it is kept in Preferences and applied
                 // by the store rather than typed over here.
-                if isConnected, provider.kind == .usage {
+                if isConnected {
                     Button {
                         draftName = preferences.nickname(for: provider.id) ?? ""
                         isRenaming.toggle()
@@ -1885,7 +1729,7 @@ private struct AccountRow: View {
                 // Per-provider threshold alerts, muted here rather than in a
                 // separate notifications pane — the thing being muted is this
                 // row's reading, so the control belongs on the row.
-                if isConnected, provider.kind == .usage {
+                if isConnected {
                     Button {
                         preferences.setAlertsMuted(!isMuted, for: provider.id)
                     } label: {
@@ -1935,9 +1779,7 @@ private struct AccountRow: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
-                    .help(provider.localModel != nil
-                          ? L10n.t("Show or hide this model in the notch. It stays loaded in \(provider.runtimeName ?? "Ollama").")
-                          : isConnected
+                    .help(isConnected
                           ? L10n.t("Switch off to stop reading \(provider.name) and forget its readings. \(provider.signIn.signOutCaveat)")
                           : L10n.t("Switch on to sign in and read \(provider.name) again."))
             }
@@ -2052,239 +1894,12 @@ private struct AccountRow: View {
                     refresh(provider.id)
                 }
             }
-
-            // Google publishes no limit for a bare API key, so the ring has
-            // nothing to fill against until the user names a ceiling itself.
-            if isConnected, provider.id == "gemini-api" {
-                // The field's own title would be drawn as a leading label
-                // inside a `Form` row, which puts the caption hard against
-                // the box and leaves the unit stranded past it. Hidden, so
-                // the caption above can own the naming and the row can
-                // breathe.
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t("Monthly budget"))
-                    HStack(spacing: 8) {
-                        TextField(L10n.t("None"), value: $preferences.geminiAPIMonthlyTokenBudget,
-                                  format: .number)
-                            .textFieldStyle(.roundedBorder)
-                            .labelsHidden()
-                            .frame(width: 130)
-                        Text(L10n.t("tokens"))
-                    }
-                }
-                .padding(.top, 2)
-                .foregroundStyle(.secondary)
-                .help(L10n.t("Fills the ring against a ceiling you choose; Google publishes none for an API key."))
-            }
-            // Ollama owns its credential: the user enters an API key here, stored
-            // in the keychain. The env var OLLAMA_API_KEY is checked first, so a
-            // shell that exports one needs no entry here.
-            if provider.id == "ollama" {
-                ollamaKeyEntry
-            }
-
-            // MiniMax is signed into in Codenotch, or by a Coding Plan key
-            // pasted here. The region is which console that key belongs to.
-            // Stored in the keychain on Save, the same way Ollama's is.
-            if provider.id == "qoder" {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.t("Region")).foregroundStyle(.secondary)
-                    Picker(selection: $preferences.qoderRegion) {
-                        Text(L10n.t("International")).tag(Sites.QoderRegion.global)
-                        Text(L10n.t("China mainland")).tag(Sites.QoderRegion.china)
-                    } label: { EmptyView() }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 160)
-                    Text(L10n.t("Sign in to Qoder in Codenotch. Each region has a separate account and session. Website verification may be required."))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            if provider.id == "minimax" {
-                minimaxEntry
-            }
-
-            // Apify borrows the CLI's login when there is one; the token
-            // pasted here is for a Mac without it. Stored in the keychain on
-            // Save, the same way Ollama's is.
-            if provider.id == "apify" {
-                apifyTokenEntry
-            }
-        }
-    }
-
-    /// The API key input for Ollama. Stored in the keychain on Save, then a
-    /// refresh is triggered so the ring picks up the new credential without a
-    /// relaunch.
-    @State private var ollamaKey = ""
-    @State private var ollamaKeySaved = false
-
-    private var ollamaKeyEntry: some View {
-        // Laid out like the Gemini budget above it, and for the same reason:
-        // a field's own title becomes a leading label in a `Form` row, which
-        // crowds the box and pins it to the caption. The caption goes on its
-        // own line instead, and `.small` comes off the controls — it bought
-        // nothing but a cramped row.
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L10n.t("Ollama API key"))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                SecureField(L10n.t("Paste your key"), text: $ollamaKey)
-                    .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                    .frame(maxWidth: 260)
-                Button(L10n.t("Save")) {
-                    guard !ollamaKey.isEmpty else { return }
-                    OllamaCredentials.store(ollamaKey)
-                    ollamaKey = ""
-                    ollamaKeySaved = true
-                    _ = signIn(provider.id)
-                }
-                .disabled(ollamaKey.isEmpty)
-                if ollamaKeySaved {
-                    Text(L10n.t("Saved"))
-                        .foregroundStyle(.green)
-                }
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    /// The API token input for Apify. Stored in the keychain on Save, then a
-    /// refresh is triggered so the ring picks up the new credential without a
-    /// relaunch — the same shape as Ollama's key above, and for the same
-    /// reason the caption sits on its own line.
-    @State private var apifyToken = ""
-    @State private var apifyTokenSaved = false
-
-    private var apifyTokenEntry: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L10n.t("Apify API token"))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                SecureField(L10n.t("Paste your key"), text: $apifyToken)
-                    .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                    .frame(maxWidth: 260)
-                Button(L10n.t("Save")) {
-                    guard !apifyToken.isEmpty else { return }
-                    ApifyCredentials.storeSettingsToken(apifyToken)
-                    apifyToken = ""
-                    apifyTokenSaved = true
-                    _ = signIn(provider.id)
-                }
-                .disabled(apifyToken.isEmpty)
-                if apifyTokenSaved {
-                    Text(L10n.t("Saved"))
-                        .foregroundStyle(.green)
-                }
-            }
-            Text(L10n.t("Paste a token from Apify Console › Settings › API & Integrations. Not needed after apify login, or with APIFY_TOKEN exported. Stored in your login keychain."))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, 2)
-    }
-
-    /// Region and Coding Plan key for MiniMax.
-    ///
-    /// Laid out like the Ollama key above it, and for the same reason: a
-    /// field's own title becomes a leading label in a `Form` row. Captions
-    /// sit on their own line. Changing the region only stores the choice —
-    /// opening Sign in here would throw a sheet over a preference picker.
-    @State private var minimaxKey = ""
-    @State private var minimaxKeySaved = false
-    @State private var minimaxCookie = ""
-    @State private var minimaxCookieSaved = false
-
-    private var minimaxEntry: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.t("Region"))
-                    .foregroundStyle(.secondary)
-                Picker(selection: $preferences.minimaxRegion) {
-                    Text(L10n.t("International")).tag(MiniMaxRegion.international)
-                    Text(L10n.t("China mainland")).tag(MiniMaxRegion.china)
-                } label: {
-                    EmptyView()
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 160)
-            }
-
-            minimaxKeyEntry
-            minimaxCookieEntry
-
-            Text(L10n.t("Sign in to MiniMax in Codenotch, or paste a Coding Plan key. A Cookie header is optional. Codenotch never reads a browser's cookies."))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, 2)
-    }
-
-    private var minimaxKeyEntry: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L10n.t("MiniMax Coding Plan key"))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                SecureField(L10n.t("Paste your key"), text: $minimaxKey)
-                    .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                    .frame(maxWidth: 260)
-                Button(L10n.t("Save")) {
-                    guard !minimaxKey.isEmpty else { return }
-                    MiniMaxCredentials.storeAPIKey(minimaxKey)
-                    minimaxKey = ""
-                    minimaxKeySaved = true
-                    _ = signIn(provider.id)
-                }
-                .disabled(minimaxKey.isEmpty)
-                if minimaxKeySaved {
-                    Text(L10n.t("Saved"))
-                        .foregroundStyle(.green)
-                }
-            }
-        }
-    }
-
-    private var minimaxCookieEntry: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L10n.t("Cookie header (optional)"))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                SecureField(L10n.t("Cookie: …"), text: $minimaxCookie)
-                    .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                    .frame(maxWidth: 260)
-                Button(L10n.t("Save")) {
-                    guard !minimaxCookie.isEmpty else { return }
-                    MiniMaxCredentials.storeCookieHeader(minimaxCookie)
-                    minimaxCookie = ""
-                    minimaxCookieSaved = true
-                    _ = signIn(provider.id)
-                }
-                .disabled(minimaxCookie.isEmpty)
-                if minimaxCookieSaved {
-                    Text(L10n.t("Saved"))
-                        .foregroundStyle(.green)
-                }
-            }
         }
     }
 
     @ViewBuilder
     private var accountDetail: some View {
-        if let model = provider.localModel {
-            Text(isConnected ? L10n.t("\(model.memoryText) \(model.memoryLabel) · via \(provider.runtimeName ?? "Ollama")")
-                 : L10n.t("Hidden from the notch · Loaded in \(provider.runtimeName ?? "Ollama")"))
-                .foregroundStyle(.secondary)
-        } else if !isConnected {
+        if !isConnected {
             Text(L10n.t("Signed out — nothing is read, and no readings are kept."))
                 .foregroundStyle(.tertiary)
         } else if let account = provider.account {
@@ -2406,9 +2021,9 @@ private struct AccountRow: View {
                     didConnect()
                     // Nothing to open for Claude Code — but then there is no
                     // account either, so `detail` is already showing what to do.
-                    if provider.localModel == nil { _ = signIn(provider.id) }
+                    _ = signIn(provider.id)
                 } else {
-                    if provider.localModel == nil { signOut(provider.id) }
+                    signOut(provider.id)
                     preferences.setConnected(false, for: provider.id)
                 }
             }

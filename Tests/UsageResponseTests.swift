@@ -1205,7 +1205,7 @@ final class SignOutTests: XCTestCase {
         final class Other: UsageProvider, @unchecked Sendable {
             let id = "b"
             let displayName = "Other"
-            let glyph = ProviderGlyph.cursor
+            let glyph = ProviderGlyph.grok
             func fetchSnapshot() async throws -> ProviderSnapshot {
                 ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                  fidelity: .official, status: .ok,

@@ -123,33 +123,20 @@ extension UsageProvider {
 
 /// A provider as the settings sheet needs it.
 struct ProviderSummary: Identifiable, Equatable {
-    var kind: ProviderKind = .usage
-    var localModel: LocalRuntimeReading.Model? = nil
-    var sourceProviderID: String? = nil
-    /// The runtime a local model is loaded in, for the row's own words.
-    var runtimeName: String? = nil
     /// Whether this provider's credential lives in the keychain, and so can be
-    /// refused. Codex still reads an ordinary file and never prompts. Cursor
-    /// does too when the editor is signed in, but `cursor-agent` files its
-    /// JWT in the login keychain — without this flag a declined prompt would
-    /// have no "Allow access…" to put the dialogue back.
+    /// refused. Codex reads an ordinary file and never prompts.
     ///
     /// Only Antigravity's default profile reads the keychain. The extra ones
     /// are read from their own directory's `oauth_creds.json` or `agent.db`
     /// and never raise the dialogue, so offering to restore access there would
     /// point at a prompt that cannot appear.
-    ///
-    /// Apify's CLI files its token in the login keychain too, so a Deny is
-    /// possible there — and "Allow access…" is the only way back from one.
     var usesKeychain: Bool {
-        ClaudeProfile.isClaude(providerID: id) || id == AntigravityProfile.defaultID || id == "cursor"
-            || id == "apify"
+        ClaudeProfile.isClaude(providerID: id) || id == AntigravityProfile.defaultID
     }
 
     let id: String
     let name: String
     let glyph: ProviderGlyph
-    var customIconFilename: String? = nil
     let account: ProviderAccount?
     let signIn: SignInRoute
     /// Whether macOS refused this credential on the last fetch — the one state

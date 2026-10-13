@@ -138,8 +138,6 @@ final class AntigravityProfileTests: XCTestCase {
     func testGeminiAPIClashPrevention() {
         XCTAssertFalse(AntigravityProfile.isAntigravity(providerID: "gemini-api"))
         XCTAssertNil(AntigravityProfile.slug(fromProviderID: "gemini-api"))
-        let summary = ProviderSummary(id: "gemini-api", name: "Gemini API", glyph: .geminiSpark, account: nil, signIn: .guidance(""))
-        XCTAssertFalse(summary.usesKeychain)
         XCTAssertFalse(Preferences.isDefaultOnFamily("gemini-api"))
         XCTAssertNil(AntigravityProfile.slug(fromDirectoryName: "antigravity-api"))
     }

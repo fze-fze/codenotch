@@ -1235,7 +1235,7 @@ final class FirstRunCopyTests: XCTestCase {
     /// distinction that catches them is Claude *Code*.
     func testTheSetupNoteNamesEveryToolAndTheCodeDistinction() {
         let copy = SettingsView.setupCopy
-        for tool in ["Claude Code", "Cursor", "Codex", "Antigravity"] {
+        for tool in ["Claude Code", "Codex", "Antigravity", "Grok"] {
             XCTAssertTrue(copy.contains(tool), "the setup note never mentions \(tool)")
         }
         XCTAssertTrue(copy.contains("not the Claude app"),
@@ -1669,8 +1669,8 @@ final class ReauthorizeTests: XCTestCase {
     }
 }
 
-/// Claude, Antigravity and cursor-agent keep a credential in the keychain;
-/// Codex still reads a file and can never raise a prompt.
+/// Claude and Antigravity keep a credential in the keychain; Codex and Grok
+/// read a file and can never raise a prompt.
 final class KeychainProviderTests: XCTestCase {
     private func summary(_ id: String) -> ProviderSummary {
         ProviderSummary(id: id, name: id, glyph: .claude, account: nil,
@@ -1681,9 +1681,8 @@ final class KeychainProviderTests: XCTestCase {
         XCTAssertTrue(summary("claude").usesKeychain)
         XCTAssertTrue(summary("claude-work").usesKeychain, "every profile's token is a keychain item")
         XCTAssertTrue(summary("gemini").usesKeychain)
-        XCTAssertTrue(summary("cursor").usesKeychain,
-                      "cursor-agent files its JWT in the keychain")
         XCTAssertFalse(summary("codex").usesKeychain, "Codex reads a file, not the keychain")
+        XCTAssertFalse(summary("grok").usesKeychain, "Grok reads ~/.grok/auth.json, not the keychain")
     }
 }
 

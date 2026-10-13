@@ -23,8 +23,6 @@ final class NotchWindowController {
     /// **Refresh now** and always fetches; this one may decide it has fetched
     /// recently enough. See `UsageStore.refreshBecauseSomeoneIsLooking`.
     var onLook: (() -> Void)?
-    /// One "Sign in to …" item per provider that needs a browser session.
-    var signInItems: [(title: String, action: () -> Void)] = []
     /// Driven by the notch's own chrome.
 
     /// Refetch a single provider, asked for by clicking its ring.
@@ -1243,19 +1241,14 @@ final class NotchWindowController {
             windowCount: snapshot.windows.count,
             groupCount: snapshot.windowGroupCount,
             moneyWindowCount: snapshot.windows.filter { $0.money != nil }.count,
-            usageDetailGroupCount: snapshot.usageDetail?.visibleGroups.count ?? 0,
-            sessionCount: snapshot.localModel == nil ? (model.activity(for: snapshot.id)?.sessions.count ?? 0) : 0,
+            sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
             sessionCap: model.sessionCap,
             statusMessage: snapshot.statusMessage,
             blockMessage: snapshot.block?.summary(now: model.now),
             hasTokenUsage: snapshot.tokenUsage != nil,
             hasPlan: snapshot.plan != nil,
             hasResetCredits: snapshot.hasAvailableResetCredits,
-            localModelName: snapshot.localModel?.name,
-            showsLocalPerformance: snapshot.showsLocalPerformance,
-                localLedgerRows: snapshot.localLedgerRowCount,
-            compactRowCount: snapshot.compactRowCount,
-            showsDeepSeekPricing: model.deepSeekPricingEnabled
+            compactRowCount: snapshot.compactRowCount
         )
         // Across the stack the region is the card, its tail, and the gap the
         // pointer has to cross. Along it, the card's own extent.
@@ -2064,17 +2057,6 @@ final class NotchWindowController {
         refresh.isEnabled = true
         menu.addItem(refresh)
 
-        for (index, entry) in signInItems.enumerated() {
-            let item = NSMenuItem(
-                title: entry.title,
-                action: #selector(MenuActions.signIn(_:)),
-                keyEquivalent: ""
-            )
-            item.target = menuActions
-            item.tag = index
-            item.isEnabled = true
-            menu.addItem(item)
-        }
         menu.addItem(.separator())
         menu.addItem(
             withTitle: L10n.t("Quit Codenotch"),
@@ -2086,7 +2068,6 @@ final class NotchWindowController {
 
     private lazy var menuActions = MenuActions(
         refresh: { [weak self] in self?.onRefresh?() },
-        signIn: { [weak self] index in self?.signInItems[safe: index]?.action() },
         togglePinned: { [weak self] in self?.togglePinned() }
     )
 }
@@ -2096,26 +2077,18 @@ final class NotchWindowController {
 /// with closures cannot be directly.
 final class MenuActions: NSObject {
     private let refresh: () -> Void
-    private let signIn: (Int) -> Void
     private let pin: () -> Void
 
     init(
         refresh: @escaping () -> Void,
-        signIn: @escaping (Int) -> Void,
         togglePinned: @escaping () -> Void
     ) {
         self.refresh = refresh
-        self.signIn = signIn
         self.pin = togglePinned
     }
 
     @objc func refreshNow(_ sender: Any?) { refresh() }
     @objc func togglePinned(_ sender: Any?) { pin() }
-
-    @objc func signIn(_ sender: Any?) {
-        guard let item = sender as? NSMenuItem else { return }
-        signIn(item.tag)
-    }
 }
 
 extension Array {

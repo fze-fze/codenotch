@@ -37,13 +37,12 @@ final class StatusItemSummaryTests: XCTestCase {
             headlineID: "primary", weeklyID: "secondary")
     }
 
-    private func other(_ id: String, glyph: ProviderGlyph, length: TimeInterval,
-                       kind: ProviderKind = .usage) -> ProviderSnapshot {
+    private func other(_ id: String, glyph: ProviderGlyph, length: TimeInterval) -> ProviderSnapshot {
         ProviderSnapshot(
             id: id, displayName: id, glyph: glyph, fidelity: .official, status: .ok,
             windows: [LimitWindow(id: "main", label: "Limit", usedFraction: 0.5,
                                   resetsAt: now.addingTimeInterval(hour), duration: length)],
-            headlineID: "main", kind: kind)
+            headlineID: "main")
     }
 
     private func waiting(_ id: String, _ name: String, glyph: ProviderGlyph,
@@ -104,15 +103,14 @@ final class StatusItemSummaryTests: XCTestCase {
     }
 
     /// A monthly figure in the five-hour slot would be a different fact in
-    /// the same clothes, and a local model has no quota at all.
+    /// the same clothes.
     func testOnlyFiveHourWindowsAreSummarised() {
         let result = summary([
-            other("cursor", glyph: .cursor, length: 30 * 86400),
-            other("glm", glyph: .glm, length: 5 * hour),
-            other("ollama-local", glyph: .ollamaLocal, length: 5 * hour, kind: .localRuntime),
+            other("cursor", glyph: .third, length: 30 * 86400),
+            other("grok", glyph: .grok, length: 5 * hour),
         ])
-        XCTAssertEqual(result.entries.map(\.id), ["glm"])
-        XCTAssertTrue(summary([other("cursor", glyph: .cursor, length: 30 * 86400)]).entries.isEmpty,
+        XCTAssertEqual(result.entries.map(\.id), ["grok"])
+        XCTAssertTrue(summary([other("cursor", glyph: .third, length: 30 * 86400)]).entries.isEmpty,
                       "with nothing to summarise the item goes back to its icon")
     }
 
@@ -152,7 +150,7 @@ final class StatusItemSummaryTests: XCTestCase {
         let result = summary([
             waiting("claude", "Claude", glyph: .claude, status: .needsAuth),
             waiting("codex", "Codex", glyph: .openai),
-            waiting("cursor", "Cursor", glyph: .cursor),
+            waiting("cursor", "Cursor", glyph: .third),
         ])
         XCTAssertEqual(result.entries.map(\.id), ["claude", "codex"])
         for entry in result.entries {
@@ -250,10 +248,10 @@ final class StatusItemSummaryTests: XCTestCase {
     /// is the five-hour window. Another provider with such a window waits to
     /// be chosen rather than turning up by itself.
     func testNeverChosenMeansClaudeAndCodex() {
-        let readings = [claude(0.72, resetIn: 2 * hour), other("glm", glyph: .glm, length: 5 * hour),
+        let readings = [claude(0.72, resetIn: 2 * hour), other("grok", glyph: .grok, length: 5 * hour),
                         codex(0.41, resetIn: 4 * hour)]
         XCTAssertEqual(summary(readings, limits: on(nil)).entries.map(\.id), ["claude", "codex"])
-        XCTAssertEqual(summary(readings, limits: on(["glm"])).entries.map(\.id), ["glm"])
+        XCTAssertEqual(summary(readings, limits: on(["grok"])).entries.map(\.id), ["grok"])
     }
 
     /// The bar draws only what it is handed, and the store hands it only what
@@ -277,12 +275,12 @@ final class StatusItemSummaryTests: XCTestCase {
     /// makes way for the ones that are in.
     func testTheBarsRoomGoesToTheChosen() {
         let many = [claude(0.72, resetIn: hour), codex(0.41, resetIn: hour),
-                    other("glm", glyph: .glm, length: 5 * hour), other("kimi", glyph: .kimi, length: 5 * hour),
-                    other("opencode", glyph: .opencode, length: 5 * hour)]
-        XCTAssertEqual(summary(many, limits: on(["codex", "kimi", "opencode"])).entries.map(\.id),
-                       ["codex", "kimi", "opencode"])
-        let two = summary(many, limits: on(["kimi", "opencode"]))
-        XCTAssertEqual(two.entries.map(\.id), ["kimi", "opencode"])
+                    other("grok", glyph: .grok, length: 5 * hour), other("gemini", glyph: .antigravity, length: 5 * hour),
+                    other("third", glyph: .third, length: 5 * hour)]
+        XCTAssertEqual(summary(many, limits: on(["codex", "gemini", "third"])).entries.map(\.id),
+                       ["codex", "gemini", "third"])
+        let two = summary(many, limits: on(["gemini", "third"]))
+        XCTAssertEqual(two.entries.map(\.id), ["gemini", "third"])
         XCTAssertFalse(two.isCompact, "two chosen keep their countdowns")
     }
 
@@ -291,12 +289,10 @@ final class StatusItemSummaryTests: XCTestCase {
         XCTAssertTrue(StatusItemSummary.canSummarise(claude(0.72, resetIn: hour)))
         XCTAssertTrue(StatusItemSummary.canSummarise(waiting("codex", "Codex", glyph: .openai)),
                       "Codex before its first reading")
-        XCTAssertTrue(StatusItemSummary.canSummarise(other("glm", glyph: .glm, length: 5 * hour)))
-        XCTAssertFalse(StatusItemSummary.canSummarise(other("cursor", glyph: .cursor, length: 30 * 86400)),
+        XCTAssertTrue(StatusItemSummary.canSummarise(other("grok", glyph: .grok, length: 5 * hour)))
+        XCTAssertFalse(StatusItemSummary.canSummarise(other("cursor", glyph: .third, length: 30 * 86400)),
                        "a monthly limit has no five-hour figure to show")
-        XCTAssertFalse(StatusItemSummary.canSummarise(waiting("cursor", "Cursor", glyph: .cursor)))
-        XCTAssertFalse(StatusItemSummary.canSummarise(
-            other("ollama-local", glyph: .ollamaLocal, length: 5 * hour, kind: .localRuntime)))
+        XCTAssertFalse(StatusItemSummary.canSummarise(waiting("cursor", "Cursor", glyph: .third)))
     }
 
     // MARK: - What each figure says
@@ -410,7 +406,7 @@ final class StatusItemSummaryTests: XCTestCase {
 
     func testWeeklyRingOmitsUnavailableInvalidAndExpiredReadings() throws {
         XCTAssertNil(try XCTUnwrap(summary([
-            other("glm", glyph: .glm, length: 5 * hour)
+            other("grok", glyph: .grok, length: 5 * hour)
         ], weekly: true).entries.first).weeklyFraction)
 
         var invalid = claude(0.32, resetIn: hour)
@@ -479,10 +475,10 @@ final class StatusItemSummaryTests: XCTestCase {
     /// Past two, the countdowns stay in the tooltip; past four, in the menu.
     func testTheBarGoesCompactPastTwoAndStopsAtFour() {
         let many = [claude(0.72, resetIn: hour), codex(0.41, resetIn: hour),
-                    other("glm", glyph: .glm, length: 5 * hour), other("kimi", glyph: .kimi, length: 5 * hour),
-                    other("opencode", glyph: .opencode, length: 5 * hour)]
+                    other("grok", glyph: .grok, length: 5 * hour), other("gemini", glyph: .antigravity, length: 5 * hour),
+                    other("third", glyph: .third, length: 5 * hour)]
         let result = summary(many)
-        XCTAssertEqual(result.entries.map(\.id), ["claude", "codex", "glm", "kimi"])
+        XCTAssertEqual(result.entries.map(\.id), ["claude", "codex", "grok", "gemini"])
         XCTAssertTrue(result.isCompact)
         XCTAssertFalse(summary(Array(many.prefix(2))).isCompact)
     }
@@ -775,7 +771,7 @@ final class MenuBarLimitsTests: XCTestCase {
         for id in ["claude", "claude-work", "codex", "codex-side"] {
             XCTAssertTrue(limits.isChosen(id), id)
         }
-        for id in ["gemini", "glm", "kimi", "cursor"] {
+        for id in ["gemini", "grok"] {
             XCTAssertFalse(limits.isChosen(id), id)
         }
     }

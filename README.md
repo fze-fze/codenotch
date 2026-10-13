@@ -87,72 +87,14 @@ wire-level details.
 | Provider | Source | How |
 |---|---|---|
 | **Claude Code** | official | Claude Desktop's own cached usage response, where Desktop is running and signed into the same account. Then Claude Code's own `/usage`, asked of the installed `claude`. Then the OAuth token in the login keychain, against the endpoint that command uses. |
-| **Cursor** | official | The editor's signed-in session in its local SQLite state, or the `cursor-agent` login in the keychain — no separate sign-in. |
 | **Codex** | official | Using the local Codex sign-in. Shows the 5-hour and weekly limits when available, plus extra limit windows when the account has them. |
-| **DeepSeek Platform** | derived from official Platform responses | Explicit sign-in in Codenotch's own WKWebView, then the Platform account summary and API-key/model usage endpoints. Shows funded/spent balance, 30-day tokens/cost, requests and API-key count. |
 | **Antigravity** | official where licensed, otherwise a request count | Antigravity's local language server first, then Google's quota endpoint; a plain count when neither will answer for the account. |
-| **GLM** | official | Z.ai's Coding Plan monitor endpoint, with a key borrowed from whichever coding tool already holds one — Claude Code's `settings.json`, ZCode, or OpenCode. |
-| **MiniMax** | official where a Coding Plan key is used, derived from official Platform responses for the in-app sign-in | A Coding Plan key pasted in Settings, or explicit sign-in in Codenotch's own WKWebView. |
-| **QianwenAI** | derived from official console responses | Explicit sign-in in Codenotch's own WKWebView, then the console's own Token Plan gateway. Shows the plan's credits window for whichever period the console reports — weekly or monthly. |
-| **Ollama (Local)** | local runtime | Automatically detected local models, RAM/VRAM, unload time and context. Optional response capture adds thinking and generation speed. |
-| **LM Studio** | local runtime | Loaded models from LM Studio's own listing, what each one is doing (prompt, generating, queue) from its SDK socket, and speed, context use and tokens per day from its server log. No relay needed. |
-| **Grok** | official | The Grok CLI session in `~/.grok/auth.json`, against the same credits billing endpoint `/usage` uses. The ring is that included pool — shared by Grok, Grok Bot and Cursor on The X Subscription, weekly or monthly as the endpoint states. A Grok Build-only account still shows that allowance. Once the session has expired it is renewed in memory from the file's own refresh token, the way the CLI would; the file itself is never written. |
-| **OpenCode** | official | The Go plan's official usage endpoint, with the `opencode-go` key OpenCode itself stores on sign-in. |
-| **Command Code** | official | The GOAT plan's `/alpha` billing endpoints, with the key the Command Code app writes to `~/.commandcode/auth.json`. Further accounts are read from `~/.commandcode-<slug>` homes. |
-| **GitHub Copilot** | official | GitHub's Copilot quota endpoint, authenticated with the GitHub CLI session already on the Mac (`gh auth login`). |
-| **Kimi** | official | The Kimi Code CLI session in `~/.kimi-code/credentials/kimi-code.json`, against the same `/usages` endpoint the CLI's `/usage` asks. Shows the 5-hour rate window and the weekly quota. |
-| **Kiro** | official | The kiro-cli session already on this Mac, against the same `/usage` that command prints. Shows monthly credits. |
-| **Amp** | official subscription percentages; derived free-allowance percentage | The Amp CLI login in `~/.local/share/amp/secrets.json`, against Amp's `userDisplayBalanceInfo` endpoint. Shows Agent and Orb usage, or the Free allowance and replenishment rate. See [Amp details](docs/providers/amp.md). |
-| **Apify** | official | The `apify login` session already on this Mac (`~/.apify/auth.json`, or the token the CLI keeps in the keychain), or a token pasted in Settings or exported as `APIFY_TOKEN`, against the `/v2/users/me/limits` endpoint the Console's Billing page draws from. Shows this cycle's platform spend against the account's monthly usage limit. See [Apify details](docs/providers/apify.md). |
-| **Kilo** | official | The Kilo CLI's own sign-in (`~/.local/share/kilo/auth.json`), against the same coding-plan quota and balance endpoints the CLI asks. Shows the plan's quota windows and the credit balance. |
-| **Custom endpoints** | provider-reported or manual | Configure OpenAI-compatible, Anthropic Messages, or Google Gemini model discovery. Usage can be entered manually or read from a configured JSON endpoint; successful readings are kept locally as a daily hover graph. |
+| **Grok** | official | The Grok CLI session in `~/.grok/auth.json`, against the same credits billing endpoint `/usage` uses. The ring is that included pool — shared by Grok, Grok Bot, Grok Build and Cursor on The X Subscription, weekly or monthly as the endpoint states — with each product's share listed under it in the card (the one row the endpoint leaves unnamed is Cursor's). The plan's name comes from the CLI's own settings endpoint. A Grok Build-only account still shows that allowance. Once the session has expired it is renewed in memory from the file's own refresh token, the way the CLI would; the file itself is never written. |
 
-Most providers borrow a credential or session from a tool already on your Mac.
-DeepSeek is the explicit browser-login exception: it never reads a browser's
-cookies or credentials, and only makes requests after you choose **Sign in to
-DeepSeek** from Codenotch. MiniMax is the same kind of exception — a key you
-paste in Settings, or an explicit WKWebView sign-in. QianwenAI is a third: it
-publishes no usage API and has no key to paste, so that WKWebView session is the
-only way in. None of them opens a browser's cookie store.
-
-Ollama Cloud accepts an API key in Settings. Apify borrows the `apify login`
-session when there is one and otherwise takes a token pasted in Settings or
-exported as `APIFY_TOKEN`. Switching a provider off stops its usage polling
-and forgets its readings; borrowed accounts stay signed in to the tools that
-own them.
-
-**Local Ollama is detected automatically.** Configure its address or stop monitoring in **Settings → Ollama**.
-Each loaded model gets a notch cell; reorder or hide it in **Settings → Accounts**.
-Hover for RAM/VRAM, unload time, context limit and quantization.
-
-For generation speed (**tok/s**) and live **Thinking**, enable **Measure speed and thinking**
-in Settings → Ollama, keep Codenotch open and connect through its local relay:
-
-```sh
-OLLAMA_HOST=http://127.0.0.1:11435 ollama run gemma4:e4b --think
-```
-
-Speed updates after completed native Ollama responses; thinking requires streamed
-reasoning. Direct requests to Ollama's default port (`11434`) only provide model
-detection. Monitoring never initiates inference or saves prompts, reasoning or replies.
-See [Ollama details](docs/plans/2026-09-07-local-llm-provider-plan.md).
-
-**Local LM Studio is detected automatically** on the port LM Studio's own settings name
-(1234 unless you moved it). Configure the address or stop monitoring in **Settings → LM Studio**.
-Each loaded language model gets a notch cell; embedding models are left out. The cell shows the
-last response's **tok/s** and its ring fills with how much of the loaded **context** the last
-request used. A white arc turns while the model reads a prompt or generates, and becomes a ring
-of dots when requests are queued behind it. Hover for context used, tokens and requests today,
-reasoning share, speculative-decoding acceptance, model size, quantization and context limit.
-
-Nothing has to be pointed at Codenotch: what a model is doing comes from LM Studio's SDK socket
-on the same port (the one `lms ps` uses), and speed and tokens come from `~/.lmstudio/server-logs`,
-which LM Studio writes for every request from any client. Only counts and timings are read from
-those files, never a prompt or a reply. Responses through the OpenAI-compatible endpoint carry no
-clock, so their speed is timed from the generating phase and marked `~`. If LM Studio's server is
-set to require an API token, paste one in Settings → LM Studio (or export `LM_API_TOKEN`); without
-one, requests are sent with no Authorization header at all.
-See [LM Studio details](docs/plans/2026-09-10-lm-studio-provider-plan.md).
+Every provider borrows a credential or session from a tool already on your
+Mac; Codenotch never asks for a password and never opens a browser's cookie
+store. Switching a provider off stops its usage polling and forgets its
+readings; the tool that owns the account stays signed in.
 
 Settings lists the connected providers in the order the notch draws them, and
 you can drag one by its handle to move it. The order is remembered across
@@ -196,23 +138,6 @@ or writes Codex credentials. If a login expires, use that profile's Codex CLI
 to renew it. Directories outside the `~/.codex-<slug>` convention are not
 discovered automatically, and adding a profile requires restarting Codenotch,
 just as it does for Claude.
-
-Command Code has no setting for a second configuration directory: it keeps its
-login in `$HOME/.commandcode/auth.json`. A second account therefore lives in a
-second home. `~/.commandcode` stays the **Command Code** ring, and each
-`~/.commandcode-<slug>` directory adds a **Command Code (slug)** ring with its
-own limits and Settings row:
-
-```sh
-mkdir -p "$HOME/.commandcode-work"
-HOME="$HOME/.commandcode-work" commandcode login
-```
-
-Choose the second account during sign-in, then restart Codenotch. The login
-lands in `~/.commandcode-work/.commandcode/auth.json`, and that is the file
-Codenotch reads; an `auth.json` placed directly in `~/.commandcode-work` is read
-too. `COMMAND_CODE_API_KEY` names one account, so it applies to the default
-ring only. Codenotch never copies, refreshes or writes these logins.
 
 ## When a session ends
 

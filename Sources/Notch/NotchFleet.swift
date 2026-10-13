@@ -27,19 +27,6 @@ final class NotchFleet {
     private var visibility: NotchVisibility = .onHover
 
     private var snapshots: [ProviderSnapshot] = []
-    private(set) var thinkingModels: [String: Date] = [:]
-    /// Per source, the way the view model keeps them: the Ollama relay and
-    /// the LM Studio log each replace their own readings wholesale.
-    private var performances: [String: [String: LocalModelPerformance]] = [:]
-    private var localActivities: [String: LocalModelActivity] = [:]
-    private var ledger = LocalTokenLedger()
-    private var localMetricsEnabled = false
-
-    func setLocalMetricsEnabled(_ enabled: Bool) {
-        localMetricsEnabled = enabled
-        if !enabled { performances[NotchViewModel.ollamaSource] = nil; thinkingModels = [:] }
-        for model in models { model.setLocalMetricsEnabled(enabled) }
-    }
     private var refreshing: Set<String> = []
     /// Exposed read-only rather than private: completion-watching needs the
     /// merged dict after a fan-out, the same way it read `controller.model
@@ -63,8 +50,6 @@ final class NotchFleet {
     private var weeklyReading: Bool = false
     private var foldsForFullScreen = true
     private var surfaceStyle: NotchSurfaceStyle = .glass
-    private var deepSeekPricingEnabled = true
-    private var deepSeekPricingSchedule = DeepSeekPricing.Schedule.current
     /// The ⌥-drag nudge along the current edge. One value for the whole
     /// fleet, the same as `edge` itself — displays do not each get their own
     /// edge, so they do not each get their own nudge either.
@@ -103,7 +88,6 @@ final class NotchFleet {
         }
     }
     var onFocusSession: ((pid_t) -> Void)?
-    var signInItems: [(title: String, action: () -> Void)] = []
     /// An ⌥-drag on any one panel settled at a new offset. Persisting it is
     /// Preferences' job, same division `apply(edge:)` already keeps.
     var onReposition: ((CGFloat) -> Void)?
@@ -259,20 +243,6 @@ final class NotchFleet {
         }
     }
 
-    func apply(deepSeekPricingEnabled: Bool) {
-        self.deepSeekPricingEnabled = deepSeekPricingEnabled
-        for controller in controllers.values {
-            controller.model.deepSeekPricingEnabled = deepSeekPricingEnabled
-        }
-    }
-
-    func apply(deepSeekPricingSchedule: DeepSeekPricing.Schedule) {
-        self.deepSeekPricingSchedule = deepSeekPricingSchedule
-        for controller in controllers.values {
-            controller.model.deepSeekPricingSchedule = deepSeekPricingSchedule
-        }
-    }
-
     func apply(alongOffset: CGFloat) {
         self.alongOffset = alongOffset
         for controller in controllers.values {
@@ -298,35 +268,6 @@ final class NotchFleet {
         for model in models {
             model.updateSnapshots(snapshots)
             model.now = now
-        }
-    }
-
-    func setThinkingModels(_ thinking: [String: Date]) {
-        thinkingModels = thinking
-        for model in models {
-            model.thinkingModels = thinking
-        }
-    }
-
-    func setPerformances(_ measurements: [String: LocalModelPerformance],
-                         source: String = NotchViewModel.ollamaSource) {
-        performances[source] = measurements
-        for model in models {
-            model.updatePerformances(measurements, source: source)
-        }
-    }
-
-    func setLocalActivities(_ activities: [String: LocalModelActivity]) {
-        localActivities = activities
-        for model in models {
-            model.localActivities = activities
-        }
-    }
-
-    func setLedger(_ ledger: LocalTokenLedger) {
-        self.ledger = ledger
-        for model in models {
-            model.updateLedger(ledger)
         }
     }
 
@@ -470,8 +411,6 @@ final class NotchFleet {
         controller.model.showsNotchReadings = showsNotchReadings
         controller.model.weeklyReading = weeklyReading
         controller.model.surfaceStyle = surfaceStyle
-        controller.model.deepSeekPricingEnabled = deepSeekPricingEnabled
-        controller.model.deepSeekPricingSchedule = deepSeekPricingSchedule
 
         controller.onRefresh = onRefresh
         controller.onLook = { [weak self] in self?.onLook?() }
@@ -484,15 +423,7 @@ final class NotchFleet {
         controller.model.updatePending = updatePending
         controller.onReposition = onReposition
         controller.onMoveToEdge = onMoveToEdge
-        controller.signInItems = signInItems
         controller.model.updateSnapshots(snapshots)
-        controller.model.thinkingModels = thinkingModels
-        controller.model.localActivities = localActivities
-        controller.model.setLocalMetricsEnabled(localMetricsEnabled)
-        for (source, measurements) in performances {
-            controller.model.updatePerformances(measurements, source: source)
-        }
-        controller.model.updateLedger(ledger)
         controller.model.refreshing = refreshing
         controller.model.sessions = sessions
         controller.model.now = Date()

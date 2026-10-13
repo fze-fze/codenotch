@@ -40732,59 +40732,6 @@
         }
       }
     },
-    "Most readings are borrowed from a tool that already holds the account. DeepSeek and MiniMax are the exceptions: clicking Sign in opens a Codenotch window for that account, and signing out here clears only that session and its saved reading.": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ほとんどの読み取りは、すでにアカウントを持っているツールから借りています。DeepSeek と MiniMax だけは例外で、「サインイン」をクリックするとそのアカウント用の Codenotch のウインドウが開きます。ここでサインアウトしても、消えるのはそのセッションと保存された読み取りだけです。"
-          }
-        },
-        "uk": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Більшість показників беруться з інструмента, який уже тримає цей акаунт. Винятки — DeepSeek і MiniMax: натискання «Увійти» відкриває вікно Codenotch для цього акаунта, а вихід тут очищає лише цю сесію та її збережений показник."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "大多数读数借自已经持有该账号的工具。DeepSeek 和 MiniMax 是例外：点「登录」会打开该账号的 Codenotch 窗口，在这里退出只会清掉这次会话和已保存的读数。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "大多數讀數是向已經持有帳號的工具借用的。DeepSeek 與 MiniMax 是例外：點一下「登入」會開啟該帳號的 Codenotch 視窗，而在這裡登出只會清除該工作階段及其已儲存的讀數。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "대부분의 측정값은 이미 계정에 로그인된 도구에서 가져옵니다. DeepSeek와 MiniMax는 예외로, ‘로그인’을 클릭하면 해당 계정의 Codenotch 창이 열리며 여기서 로그아웃하면 해당 세션과 저장된 측정값만 삭제합니다."
-          }
-        },
-        "uz": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Koʻrsatkichlarning aksariyati hisobni allaqachon saqlab turgan vositadan olinadi. DeepSeek va MiniMax bundan mustasno: Kirish tugmasini bosish oʻsha hisob uchun Codenotch oynasini ochadi, bu yerda chiqish esa faqat oʻsha sessiya va uning saqlangan koʻrsatkichini tozalaydi."
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sebagian besar data dipinjam dari alat yang sudah menampung akun. DeepSeek dan MiniMax adalah pengecualian: mengeklik Masuk akan membuka jendela Codenotch untuk akun tersebut, dan keluar di sini hanya menghapus sesi tersebut dan data tersimpannya."
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verilerin çoğu, hesabı zaten tutan bir araçtan ödünç alınır. DeepSeek ve MiniMax istisnadır: Giriş yap'a tıklamak o hesap için bir Codenotch penceresi açar ve buradan çıkış yapmak yalnızca o oturumu ve kayıtlı verisini temizler."
-          }
-        }
-      }
-    },
     "Phone": {
       "extractionState": "manual",
       "localizations": {
@@ -58066,29 +58013,6 @@
         }
       }
     },
-    "Codenotch reads usage from tools already signed in on this Mac — it never asks for your password. Install and sign in to any of Claude Code (the terminal tool, not the Claude app), Cursor (the editor or cursor-agent), Codex, Antigravity, GLM, Grok, OpenCode, Command Code, GitHub Copilot, Kimi Code, Kiro, Amp, Apify, the Kilo CLI or a Gemini API key (via Gemini CLI, OpenCode or Hermes), and its ring appears in the notch.": {
-      "extractionState": "manual",
-      "localizations": {
-        "uk": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Codenotch читає використання з інструментів, у які вже виконано вхід на цьому Mac, і ніколи не питає ваш пароль. Установіть будь-який з них — Claude Code (термінальний інструмент, не застосунок Claude), Cursor (редактор або cursor-agent), Codex, Antigravity, GLM, Grok, OpenCode, Command Code, GitHub Copilot, Kimi Code, Kiro, Amp, Apify, Kilo CLI чи ключ Gemini API (через Gemini CLI, OpenCode або Hermes) — і увійдіть: його кільце зʼявиться у вирізі."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Codenotch 读取这台 Mac 上已经登录的工具的用量 — 从不问你的密码。安装并登录 Claude Code（终端工具，不是 Claude 应用）、Cursor（编辑器或 cursor-agent）、Codex、Antigravity、GLM、Grok、OpenCode、Command Code、GitHub Copilot、Kimi Code、Kiro、Amp、Apify、Kilo CLI，或 Gemini API 密钥（经由 Gemini CLI、OpenCode 或 Hermes）中的任意一个，刘海里就会出现对应的圆环。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Codenotch 會從這部 Mac 上已登入的工具讀取用量 — 它不會向你要密碼。安裝並登入 Claude Code（終端機工具，不是 Claude App）、Cursor（編輯器或 cursor-agent）、Codex、Antigravity、GLM、Grok、OpenCode、Command Code、GitHub Copilot、Kimi Code、Kiro、Amp、Apify、Kilo CLI，或 Gemini API 金鑰（透過 Gemini CLI、OpenCode 或 Hermes），對應的圓環就會出現在瀏海上。"
-          }
-        }
-      }
-    },
     "Checking usage route...": {
       "extractionState": "manual",
       "localizations": {
@@ -59965,6 +59889,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ürüne göre"
+          }
+        }
+      }
+    },
+    "Every reading is borrowed from a tool that already holds the account. Switching one off here stops Codenotch reading it and forgets its saved reading; the tool itself stays signed in.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有读数都来自已经登录该账号的工具。在这里关掉某一项，Codenotch 就不再读取它，并清除保存的读数；工具本身仍保持登录。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有讀數都來自已經登入該帳號的工具。在這裡關掉某一項，Codenotch 就不再讀取它，並清除儲存的讀數；工具本身仍保持登入。"
+          }
+        }
+      }
+    },
+    "Codenotch reads usage from tools already signed in on this Mac — it never asks for your password. Install and sign in to any of Claude Code (the terminal tool, not the Claude app), Codex, Antigravity or Grok, and its ring appears in the notch.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codenotch 从这台 Mac 上已经登录的工具读取用量——从不索要你的密码。安装并登录 Claude Code（终端工具，不是 Claude App）、Codex、Antigravity 或 Grok 中的任意一个，它的圆环就会出现在刘海里。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codenotch 從這台 Mac 上已經登入的工具讀取用量——從不索取你的密碼。安裝並登入 Claude Code（終端機工具，不是 Claude App）、Codex、Antigravity 或 Grok 中的任意一個，它的圓環就會出現在瀏海裡。"
           }
         }
       }

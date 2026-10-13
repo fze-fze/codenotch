@@ -10,9 +10,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var phoneLinkPairing: PhoneLinkPairing?
     var phoneLinkRegistry: PhoneLinkRegistry?
     private var activityCoordinator: ActivityCoordinator?
-    private var piResponseMonitor: PiResponseMonitor?
-    private var ollamaRelay: OllamaActivityRelay?
-    private var lmstudioMetrics: LMStudioMetrics?
     private var preferences: Preferences?
     private var settings: SettingsWindowController?
     private var whatsNew: WhatsNewWindowController?
@@ -85,13 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let claudeProfiles = ClaudeProfile.discover()
     private let codexProfiles = CodexProfile.discover()
     private let antigravityProfiles = AntigravityProfile.discover()
-    private let commandCodeProfiles = CommandCodeProfile.discover()
     /// Held as concrete providers, not just handed to the store: the token
     /// refresher needs to ask one of them how long its token has left, and the
     /// protocol has no business carrying that.
     private var claudeProviders: [ClaudeOAuthProvider] = []
-    /// MiniMax Platform sign-in sheet. Not a UsageProvider — that is MiniMaxProvider.
-    private var miniMaxWeb: WebSessionProvider?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Set here, not in the Info.plist: this call is applied at launch and
@@ -123,39 +117,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["CODENOTCH_DEMO"] == "1" {
             fleet.setSnapshots(Fixtures.snapshots())
         } else {
-            // DeepSeek's Platform usage page is a browser-session provider:
-            // login is explicit, stays in Codenotch's own WKWebView store, and
-            // the page-local requests are refreshed only after that login.
-            let deepSeek = WebSessionProvider(site: Sites.deepSeek)
-            // QianwenAI's Token Plan is the same kind of provider: no usage API
-            // to call, only a console, readable after the user signs in inside
-            // this app's own WKWebView. Unlike MiniMax's sheet below, its ring
-            // *is* this adapter, so it belongs in `webProviders` — exactly once.
-            let qianwen = WebSessionProvider(site: Sites.qianwen)
-            let qoder = WebSessionProvider(site: Sites.qoder(region: preferences.qoderRegion))
-            // MiniMax's ring is MiniMaxProvider. The sheet is the same kind of
-            // WebView DeepSeek uses, but it must not join `webProviders`:
-            // those are appended to `allProviders`, and two adapters with
-            // id `minimax` would both poll, both draw a row, and fight over
-            // the same archive key. Region is applied here and again when
-            // Settings changes it, because the fetch URLs live on the site.
-            let miniMaxWeb = WebSessionProvider(site: Sites.minimax(region: preferences.minimaxRegion))
-            self.miniMaxWeb = miniMaxWeb
-            let webProviders: [WebSessionProvider] = [deepSeek, qianwen, qoder]
-            fleet.signInItems = [deepSeek, miniMaxWeb, qianwen, qoder].map { provider in
-                let name = provider.displayName
-                return (title: L10n.t("Sign in to \(name)…"),
-                        action: { [weak provider] in provider?.presentSignIn() })
-            }
-
-            // Cursor reads the editor's session, or cursor-agent's if the
-            // editor is missing — never a browser one: signing into
-            // cursor.com separately created a second, empty account.
-            //
-            // Built *after* preferences and told what is switched off, so the
-            // very first list it draws already excludes them. Constructed first,
-            // it drew every provider from the archive and only dropped the
-            // switched-off ones once the binding below delivered.
+            // The store is built *after* preferences and told what is switched
+            // off, so the very first list it draws already excludes them.
+            // Constructed first, it drew every provider from the archive and
+            // only dropped the switched-off ones once the binding below
+            // delivered.
             Log.usage.info("claude profiles: \(self.claudeProfiles.map(\.displayPath).joined(separator: ", "), privacy: .public)")
             Log.usage.info("codex profiles: \(self.codexProfiles.map(\.displayPath).joined(separator: ", "), privacy: .public)")
             Log.usage.info("antigravity profiles: \(self.antigravityProfiles.map(\.displayPath).joined(separator: ", "), privacy: .public)")
@@ -167,28 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ClaudeOAuthProvider(profile: $0, displayName: claudeNames[$0.id])
             }
             self.claudeProviders = claudeProviders
-            let customProviders: [UsageProvider] = preferences.customEndpoints.filter(\.isEnabled).map { endpoint in
-                CustomEndpointProvider(endpoint: endpoint)
-            }
             let allProviders: [UsageProvider] = claudeProviders
-                + [CursorLocalProvider()]
                 + codexProfiles.map { CodexLocalProvider(profile: $0) }
                 + antigravityProfiles.map { AntigravityProvider(profile: $0) }
-                + [GLMProvider(), MiniMaxProvider(web: miniMaxWeb), GrokLocalProvider(), DevinLocalProvider(), OpenCodeProvider()]
-                + commandCodeProfiles.map { CommandCodeProvider(profile: $0) }
-                + [GitHubCopilotProvider(), KimiProvider(), KiroProvider(), AmpProvider(),
-                   ApifyProvider(), KiloProvider(),
-                   OllamaLocalProvider(endpoint: URL(string: preferences.ollamaEndpoint)!),
-                   LMStudioLocalProvider(endpoint: URL(string: preferences.lmstudioEndpoint)!),
-                   OllamaProvider(),
-                   // A closure, not the value: the provider is an actor and
-                   // re-reads the budget on every fetch, so a ceiling typed
-                   // into Settings applies without a restart.
-                   GeminiAPIProvider(budget: {
-                       Preferences.storedGeminiAPIMonthlyTokenBudget()
-                   })]
-                + webProviders
-                + customProviders
+                + [GrokLocalProvider()]
             preferences.reconcile(discoveredIDs: allProviders.map(\.id))
             let store = UsageStore(
                 providers: allProviders,
@@ -199,34 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // order for a frame and then visibly shuffles.
                 order: preferences.providerOrder
             )
-            preferences.$customEndpoints
-                .map { endpoints in
-                    endpoints.filter(\.isEnabled).map {
-                        "\($0.id):\($0.name):\($0.baseURL):\($0.apiType.rawValue):\($0.trackingUnit.rawValue):\($0.monthlyBudgetUSD ?? -1):\($0.currentSpendUSD ?? -1):\($0.monthlyBudgetTokensM ?? -1):\($0.currentTokensUsedM ?? -1):\($0.displayRemaining):\($0.showCurrency):\($0.iconPreset ?? ""):\($0.customIconFilename ?? ""):\($0.accentColorHex):\($0.selectedModel):\($0.usageSource.rawValue):\($0.usagePreset?.rawValue ?? ""):\($0.usageURL ?? ""):\($0.usageRecordsPath ?? ""):\($0.usageModelField ?? ""):\($0.usageTokenField ?? ""):\($0.usageModelFilter ?? ""):\($0.usageAuthentication.rawValue)"
-                    }
-                }
-                .removeDuplicates()
-                .receive(on: RunLoop.main)
-                .sink { [weak store] _ in
-                    let stored = Preferences.storedCustomEndpoints()
-                    let active = stored.filter(\.isEnabled)
-                    let providers: [UsageProvider] = active.map { CustomEndpointProvider(endpoint: $0) }
-                    store?.registerCustomProviders(providers)
-                }
-                .store(in: &cancellables)
             Costs.attach(to: store)
-            deepSeek.onAuthenticated = { [weak store] in
-                store?.providerAuthenticationChanged(providerID: "deepseek")
-            }
-            qianwen.onAuthenticated = { [weak store] in
-                store?.providerAuthenticationChanged(providerID: "qianwenai")
-            }
-            qoder.onAuthenticated = { [weak store] in
-                store?.providerAuthenticationChanged(providerID: "qoder")
-            }
-            miniMaxWeb.onAuthenticated = { [weak store] in
-                store?.providerAuthenticationChanged(providerID: "minimax")
-            }
 
             let updater = Updater()
             self.updater = updater
@@ -247,74 +168,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .store(in: &cancellables)
             if !isRunningTests { updater.start() }
 
-            let relay = OllamaActivityRelay()
-            self.ollamaRelay = relay
-            // A single publisher chain exceeds Swift's type-checking time limit.
-            let relayPreferences = Publishers.CombineLatest3(
-                preferences.$connectedProviders,
-                preferences.$ollamaEndpoint,
-                preferences.$ollamaMetricsEnabled)
-            let relayConfiguration = relayPreferences.map { values in
-                (enabled: values.0.contains("ollama-local") && values.2, endpoint: values.1)
-            }.eraseToAnyPublisher()
-            relayConfiguration
-                .removeDuplicates { $0.enabled == $1.enabled && $0.endpoint == $1.endpoint }
-                .receive(on: RunLoop.main)
-                .sink { [weak relay, weak fleet] configuration in
-                    fleet?.setLocalMetricsEnabled(configuration.enabled)
-                    relay?.configure(enabled: configuration.enabled, endpoint: configuration.endpoint)
-                }
-                .store(in: &cancellables)
-            relay.$thinkingModels
-                .receive(on: RunLoop.main)
-                .sink { [weak fleet, weak store] models in
-                    let previous = fleet?.thinkingModels ?? [:]
-                    fleet?.setThinkingModels(models)
-                    if models.keys.contains(where: { previous[$0] == nil }) { store?.refresh(providerID: "ollama-local") }
-                }
-                .store(in: &cancellables)
-
-            relay.$performances
-                .receive(on: RunLoop.main)
-                .sink { [weak fleet, weak store] measurements in
-                    fleet?.setPerformances(measurements)
-                    if !measurements.isEmpty { store?.refresh(providerID: "ollama-local") }
-                }
-                .store(in: &cancellables)
-
-            // LM Studio needs no relay: its own socket says what each model is
-            // doing and its own log says what every request cost. Monitoring
-            // follows the provider's switch, and the address follows Settings.
-            let lmstudio = LMStudioMetrics()
-            self.lmstudioMetrics = lmstudio
-            // Split like the relay's chain above, and for the same reason.
-            let lmstudioPreferences = Publishers.CombineLatest(
-                preferences.$connectedProviders, preferences.$lmstudioEndpoint)
-            let lmstudioConfiguration = lmstudioPreferences.map { values in
-                (enabled: values.0.contains(LMStudioMetrics.providerID), endpoint: values.1)
-            }.eraseToAnyPublisher()
-            lmstudioConfiguration
-                .removeDuplicates { $0.enabled == $1.enabled && $0.endpoint == $1.endpoint }
-                .receive(on: RunLoop.main)
-                .sink { [weak lmstudio] configuration in
-                    lmstudio?.configure(enabled: configuration.enabled, endpoint: configuration.endpoint)
-                }
-                .store(in: &cancellables)
-            lmstudio.$activities
-                .receive(on: RunLoop.main)
-                .sink { [weak fleet] in fleet?.setLocalActivities($0) }
-                .store(in: &cancellables)
-            lmstudio.$performances
-                .receive(on: RunLoop.main)
-                .sink { [weak fleet, weak store] measurements in
-                    fleet?.setPerformances(measurements, source: LMStudioMetrics.providerID)
-                    if !measurements.isEmpty { store?.refresh(providerID: LMStudioMetrics.providerID) }
-                }
-                .store(in: &cancellables)
-            lmstudio.$ledger
-                .receive(on: RunLoop.main)
-                .sink { [weak fleet] in fleet?.setLedger($0) }
-                .store(in: &cancellables)
 
             let dir: URL
             if NSClassFromString("XCTestCase") != nil {
@@ -417,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sendTestNotification: { [weak self] in
                     self?.sendTestNotification()
                 },
-                usageStore: store, ollamaRelay: relay, lmstudioMetrics: lmstudio,
+                usageStore: store,
                 phoneLinkPairing: phonePairing, phoneLinkRegistry: phoneRegistry, phoneLinkServerStatus: serverStatus
             )
             // The gear toggles; everything else that opens settings opens it.
@@ -465,9 +318,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // value to the item, and Settings — a published property away —
             // redraws its own switch from it in the same breath.
             statusItem.onToggleLimits = { [weak preferences] in preferences?.showsLimitsInMenuBar = $0 }
-            // Read when the menu opens, so a model's line is as current as its cell.
-            statusItem.cells = { [weak fleet] in fleet?.menuModel.snapshots ?? [] }
-            statusItem.activity = { [weak fleet] in fleet?.menuModel.activity(for: $0) }
             // Handed over up front, like the notch's edge: the sink below
             // delivers a run loop turn later, and the item would otherwise go
             // up as one thing and then change its mind.
@@ -515,37 +365,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak fleet] in fleet?.apply(foldsForFullScreen: $0) }
                 .store(in: &cancellables)
 
-            preferences.$deepSeekPricingEnabled
-                .receive(on: RunLoop.main)
-                .sink { [weak fleet] in fleet?.apply(deepSeekPricingEnabled: $0) }
-                .store(in: &cancellables)
-
-            preferences.$deepSeekPricingSchedule
-                .receive(on: RunLoop.main)
-                .sink { [weak fleet] in fleet?.apply(deepSeekPricingSchedule: $0) }
-                .store(in: &cancellables)
-
-            preferences.$qoderRegion
-                .dropFirst()
-                .removeDuplicates()
-                .receive(on: RunLoop.main)
-                .sink { [weak qoder, weak store] region in
-                    guard let qoder else { return }
-                    store?.providerContextChanged(providerID: "qoder") {
-                        qoder.apply(site: Sites.qoder(region: region))
-                    }
-                }
-                .store(in: &cancellables)
-
-            preferences.$minimaxRegion
-                .dropFirst()
-                .removeDuplicates()
-                .receive(on: RunLoop.main)
-                .sink { [weak miniMaxWeb, weak store] region in
-                    miniMaxWeb?.apply(site: Sites.minimax(region: region))
-                    store?.refresh(providerID: "minimax")
-                }
-                .store(in: &cancellables)
 
             preferences.$notchEdge
                 .receive(on: RunLoop.main)
@@ -671,9 +490,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak fleet] in fleet?.apply(colorTransitionStyle: $0) }
                 .store(in: &cancellables)
 
-            Publishers.CombineLatest(preferences.$connectedProviders, preferences.$disabledModels)
+            preferences.$connectedProviders
                 .receive(on: RunLoop.main)
-                .sink { [weak store, weak preferences] _, _ in
+                .sink { [weak store, weak preferences] _ in
                     guard let store, let preferences else { return }
                     store.disconnected = preferences.disconnectedIDs(among: store.knownIDs)
                 }
@@ -684,39 +503,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak store] in store?.nicknames = $0 }
                 .store(in: &cancellables)
 
-            preferences.$ollamaEndpoint
-                .receive(on: RunLoop.main)
-                .sink { [weak store] address in
-                    guard let endpoint = try? OllamaEndpoint.parse(address) else { return }
-                    store?.updateOllamaEndpoint(endpoint)
-                }
-                .store(in: &cancellables)
-
-            preferences.$lmstudioEndpoint
-                .receive(on: RunLoop.main)
-                .sink { [weak store] address in
-                    guard let endpoint = try? LMStudioEndpoint.parse(address) else { return }
-                    store?.updateLMStudioEndpoint(endpoint)
-                }
-                .store(in: &cancellables)
 
             preferences.$providerOrder
                 .receive(on: RunLoop.main)
                 .sink { [weak store] in store?.order = $0 }
                 .store(in: &cancellables)
 
-            // Redraw the Gemini API ring against the new ceiling.
-            //
-            // `dropFirst` because `@Published` publishes the value it is given
-            // at init, and a refresh there would race the store's first poll.
-            // `receive(on:)` because `@Published` emits in `willSet` — the hop
-            // to the next run loop pass is what lets the `didSet` persist the
-            // number before the provider's closure goes looking for it.
-            preferences.$geminiAPIMonthlyTokenBudget
-                .dropFirst()
-                .receive(on: RunLoop.main)
-                .sink { [weak store] _ in store?.refresh(providerID: "gemini-api") }
-                .store(in: &cancellables)
 
             // Limit crossings become notifications here rather than inside
             // the store: the store fetches, the notifier decides what is
@@ -791,28 +583,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak fleet] ids in fleet?.setRefreshing(ids) }
                 .store(in: &cancellables)
 
-            // CODENOTCH_DISCOVER=<url> loads that page in the signed-in WebView
-            // and logs the API calls it makes — for finding an undocumented
-            // endpoint by watching the site rather than guessing at path names.
-            if let target = ProcessInfo.processInfo.environment["CODENOTCH_DISCOVER"],
-               let url = URL(string: target),
-               let provider = webProviders.first(where: { url.host?.contains($0.id) == true })
-                   ?? webProviders.first {
-                Task {
-                    let calls = await provider.recordCalls(on: url)
-                    Log.usage.notice("discovered: \(calls.joined(separator: "  "), privacy: .public)")
-                }
-            }
             self.store = store
         }
 
         // What each agent is doing right now, so the notch can say whether it is
         // still working without you switching to it.
         var monitors: [String: any AgentActivityMonitor] = [
-            "cursor": CursorActivityMonitor(),
             "grok": GrokActivityMonitor(),
-            "gemini-api": GeminiAPIActivityMonitor(),
-            "kimi": KimiActivityMonitor(),
         ]
         for profile in antigravityProfiles {
             monitors[profile.id] = AntigravityActivityMonitor(profile: profile)
@@ -933,34 +710,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        let piResponseMonitor = PiResponseMonitor(
-            onResponse: { [weak self] providerID in
-                _ = self?.store?.refresh(providerID: providerID)
-            },
-            onActivity: { [weak activity] providerID, snapshots in
-                let sessions = snapshots.map {
-                    AgentSession(
-                        id: $0.id,
-                        name: $0.model,
-                        detail: L10n.t("Working"),
-                        state: .busy,
-                        waitingFor: nil,
-                        since: $0.since
-                    )
-                }
-                activity?.setSupplementalSessions(
-                    providerID: providerID,
-                    source: "pi",
-                    sessions: sessions
-                )
-            }
-        )
-        piResponseMonitor.start()
-        self.piResponseMonitor = piResponseMonitor
 
-        store?.isBusy = { [weak self, weak activity] in
-            (activity?.isBusy ?? false) || (self?.lmstudioMetrics?.isBusy ?? false)
-        }
+        store?.isBusy = { [weak activity] in activity?.isBusy ?? false }
         // Read on every look rather than carried in by a sink, for the reason
         // `isBusy` is: a stored copy answers with whatever the preference was
         // when it was last delivered, and this one is a switch somebody flips to
@@ -1028,8 +779,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fleet.apply(weeklyReading: preferences.weeklyReading)
         fleet.apply(foldsForFullScreen: preferences.foldsForFullScreen)
         fleet.apply(surfaceStyle: preferences.notchSurfaceStyle)
-        fleet.apply(deepSeekPricingEnabled: preferences.deepSeekPricingEnabled)
-        fleet.apply(deepSeekPricingSchedule: preferences.deepSeekPricingSchedule)
         fleet.show()
     }
 
@@ -1257,10 +1006,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        ollamaRelay?.configure(enabled: false, endpoint: OllamaEndpoint.defaultAddress)
-        lmstudioMetrics?.stop()
         tokenRefresher?.stop()
-        piResponseMonitor?.stop()
         store?.stop()
         activityCoordinator?.stop()
         notchFleet?.stop()
