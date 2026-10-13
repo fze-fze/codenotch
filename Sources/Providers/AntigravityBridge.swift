@@ -36,6 +36,8 @@ enum AntigravityBridge {
 
     private static let service =
         "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+    private static let userStatusService =
+        "/exa.language_server_pb.LanguageServerService/GetUserStatus"
 
     // MARK: - Finding it
 
@@ -159,6 +161,40 @@ enum AntigravityBridge {
             )
         }
         return windows(in: data)
+    }
+
+    /// The plan's name, from the language server's `GetUserStatus` — the
+    /// same call Antigravity's own account panel draws from. Nil when no port
+    /// answers; it is a label, never a reason to fail the reading.
+    static func planName(from endpoint: Endpoint, session: URLSession) async -> String? {
+        for port in endpoint.ports {
+            var request = URLRequest(
+                url: URL(string: "https://127.0.0.1:\(port)\(userStatusService)")!
+            )
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if let token = endpoint.csrfToken { request.setValue(token, forHTTPHeaderField: csrfHeader) }
+            request.httpBody = Data("{}".utf8)
+            request.timeoutInterval = 10
+            guard let (data, response) = try? await session.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let name = planName(inUserStatus: data)
+            else { continue }
+            return name
+        }
+        return nil
+    }
+
+    /// `userTier.name` is the subscription as Google sells it ("Google AI
+    /// Pro"); `planStatus.planInfo.planName` is the short form ("Pro") the
+    /// server falls back to.
+    static func planName(inUserStatus data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = root["userStatus"] as? [String: Any]
+        else { return nil }
+        let tier = (status["userTier"] as? [String: Any])?["name"] as? String
+        let plan = ((status["planStatus"] as? [String: Any])?["planInfo"] as? [String: Any])?["planName"] as? String
+        return tier?.nonEmptyPlan ?? plan?.nonEmptyPlan
     }
 
     /// Turns the quota summary into limit windows.

@@ -43,6 +43,10 @@ actor AntigravityProvider: UsageProvider {
     /// rather than degraded.
     private var everBridged = false
 
+    /// The plan's name and when it was read. A plan changes on a purchase, not
+    /// between polls, so the language server is asked again only after an hour.
+    private var plan: (name: String?, readAt: Date)?
+
     /// How the language server is asked, when a test needs to say. Production
     /// leaves this nil and goes through `localQuota()`, which spawns `ps` and
     /// `lsof` to find a port that only exists while Antigravity is running —
@@ -113,10 +117,12 @@ actor AntigravityProvider: UsageProvider {
                 everBridged = true
                 UserDefaults.standard.set(true, forKey: "AntigravityEverBridged")
                 
-                return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
-                                        fidelity: .official, status: .ok, windows: windows,
-                                        headlineID: resolveHeadlineID(for: windows),
-                                        weeklyID: resolveWeeklyID(for: windows))
+                var snapshot = ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
+                                                fidelity: .official, status: .ok, windows: windows,
+                                                headlineID: resolveHeadlineID(for: windows),
+                                                weeklyID: resolveWeeklyID(for: windows))
+                snapshot.plan = await localPlanName()
+                return snapshot
             }
 
             if localQuotaOverride != nil && everBridged {
@@ -226,6 +232,16 @@ actor AntigravityProvider: UsageProvider {
                 window.label.lowercased().contains("weekly")
         }
         return weekly.max(by: constrainedBefore)?.id
+    }
+
+    /// The plan's name from the language server that just answered, held for
+    /// an hour. Nil under test, where there is no server to ask.
+    private func localPlanName() async -> String? {
+        if let plan, Date().timeIntervalSince(plan.readAt) < 3600 { return plan.name }
+        guard localQuotaOverride == nil, let bridge else { return plan?.name }
+        let name = await AntigravityBridge.planName(from: bridge, session: localSession) ?? plan?.name
+        plan = (name, Date())
+        return name
     }
 
     /// Ask Antigravity's language server, if it is running.
